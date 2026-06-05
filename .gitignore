@@ -1,0 +1,6 @@
+logs/
+*.jsonl*
+
+user_data/
+
+!.gitignore

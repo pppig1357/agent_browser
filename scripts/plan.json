@@ -1,0 +1,7 @@
+[
+  {"action": "goto", "args": ["https://core.xjtlu.edu.cn/auth/saml2/login.php?wants=https%3A%2F%2Fcore.xjtlu.edu.cn%2F&idp=59e86c8687092bdfa106649b2d5519e5&passive=off"]},
+  {"action": "wait", "args": ["8000"]},
+  {"action": "goto", "args": ["https://core.xjtlu.edu.cn/mod/resource/view.php?id=135322"]},
+  {"action": "wait", "args": ["3000"]},
+  {"action": "download", "args": ["a[href*='.rar']", "D:\\Openclaw\\workspace\\downloads\\Quiz_CCT008_AY2425.rar"]}
+]

@@ -1,0 +1,377 @@
+{
+  "url": "https://core.xjtlu.edu.cn/my/",
+  "title": "个人主页 | LM Core",
+  "elements": [
+    {
+      "i": 0,
+      "tag": "a",
+      "sel": "a.sr-only.sr-only-focusable",
+      "label": "跳到主要内容",
+      "placeholder": "",
+      "href": "#maincontent",
+      "visible": false
+    },
+    {
+      "i": 1,
+      "tag": "a",
+      "sel": "a.navbar-brand.d-none",
+      "label": "https://core.xjtlu.edu.cn/my/",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/my/",
+      "visible": true
+    },
+    {
+      "i": 2,
+      "tag": "a",
+      "sel": "a.nav-link.active",
+      "label": "个人主页",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/my/",
+      "visible": true
+    },
+    {
+      "i": 3,
+      "tag": "a",
+      "sel": "a.nav-link.",
+      "label": "我的课程",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/my/courses.php",
+      "visible": true
+    },
+    {
+      "i": 4,
+      "tag": "a",
+      "sel": "a.nav-link.",
+      "label": "所有课程",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/course/index.php",
+      "visible": true
+    },
+    {
+      "i": 5,
+      "tag": "a",
+      "sel": "a.nav-link.",
+      "label": "帮助",
+      "placeholder": "",
+      "href": "https://knowledgebase.xjtlu.edu.cn/index.php",
+      "visible": true
+    },
+    {
+      "i": 6,
+      "tag": "a",
+      "sel": "a.btn.btn-open",
+      "label": "切换搜索输入",
+      "placeholder": "",
+      "href": "#searchform-navbar",
+      "visible": true
+    },
+    {
+      "i": 7,
+      "tag": "div",
+      "sel": "div.popover-region-toggle.nav-link",
+      "label": "108",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 8,
+      "tag": "a",
+      "sel": "a.mark-all-read-button",
+      "label": "全部标记为已读",
+      "placeholder": "",
+      "href": "#",
+      "visible": true
+    },
+    {
+      "i": 9,
+      "tag": "a",
+      "sel": "a",
+      "label": "通知偏好",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/message/notificationpreferences.php",
+      "visible": true
+    },
+    {
+      "i": 10,
+      "tag": "div",
+      "sel": "div.empty-message",
+      "label": "您没有通知",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 11,
+      "tag": "a",
+      "sel": "a.see-all-link",
+      "label": "查看所有",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/message/output/popup/notifications.php",
+      "visible": true
+    },
+    {
+      "i": 12,
+      "tag": "a",
+      "sel": "a#message-drawer-toggle-6a22deaa7bbb36a22deaa752456.nav-link.popover-region-toggle",
+      "label": "0 有 0 个未读对话",
+      "placeholder": "",
+      "href": "#",
+      "visible": true
+    },
+    {
+      "i": 13,
+      "tag": "span",
+      "sel": "span.sr-only.sr-only-focusable",
+      "label": "span",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 14,
+      "tag": "a",
+      "sel": "a#user-menu-toggle.btn.dropdown-toggle",
+      "label": "M",
+      "placeholder": "",
+      "href": "#",
+      "visible": true
+    },
+    {
+      "i": 15,
+      "tag": "a",
+      "sel": "a.list-group-item.list-group-item-action",
+      "label": "个人主页",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/my/",
+      "visible": true
+    },
+    {
+      "i": 16,
+      "tag": "a",
+      "sel": "a.list-group-item.list-group-item-action",
+      "label": "我的课程",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/my/courses.php",
+      "visible": true
+    },
+    {
+      "i": 17,
+      "tag": "a",
+      "sel": "a.list-group-item.list-group-item-action",
+      "label": "所有课程",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/course/index.php",
+      "visible": true
+    },
+    {
+      "i": 18,
+      "tag": "a",
+      "sel": "a.list-group-item.list-group-item-action",
+      "label": "帮助",
+      "placeholder": "",
+      "href": "https://knowledgebase.xjtlu.edu.cn/index.php",
+      "visible": true
+    },
+    {
+      "i": 19,
+      "tag": "a",
+      "sel": "a.sr-only.sr-only-focusable",
+      "label": "跳过 Bookmarks",
+      "placeholder": "",
+      "href": "#sb-1",
+      "visible": true
+    },
+    {
+      "i": 20,
+      "tag": "i",
+      "sel": "i.fa.fa-arrows-v",
+      "label": "i",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 21,
+      "tag": "a",
+      "sel": "a",
+      "label": "Course: EAP045-2526-S2-Weekly Folders 1 Intermediate English",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/course/view.php?id=5498",
+      "visible": true
+    },
+    {
+      "i": 22,
+      "tag": "button",
+      "sel": "button.btn.icon-no-margin",
+      "label": "打开块抽屉",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 23,
+      "tag": "a",
+      "sel": "a.sr-only.sr-only-focusable",
+      "label": "跳过 XPU002 Exam Link (Clickable)",
+      "placeholder": "",
+      "href": "#sb-3",
+      "visible": true
+    },
+    {
+      "i": 24,
+      "tag": "a",
+      "sel": "a",
+      "label": "https://core.xjtlu.edu.cn/course/view.php?id=5427",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/course/view.php?id=5427",
+      "visible": true
+    },
+    {
+      "i": 25,
+      "tag": "a",
+      "sel": "a",
+      "label": "AY24-25 LM Core System",
+      "placeholder": "",
+      "href": "https://core-archive24-25.xjtlu.edu.cn/local/login/index.php",
+      "visible": false
+    },
+    {
+      "i": 26,
+      "tag": "a",
+      "sel": "a",
+      "label": "Archive Systems",
+      "placeholder": "",
+      "href": "https://core-archive.xjtlu.edu.cn/",
+      "visible": false
+    },
+    {
+      "i": 27,
+      "tag": "a",
+      "sel": "a",
+      "label": "https://xipuai.xjtlu.edu.cn",
+      "placeholder": "",
+      "href": "https://xipuai.xjtlu.edu.cn",
+      "visible": false
+    },
+    {
+      "i": 28,
+      "tag": "a",
+      "sel": "a.moveBtn",
+      "label": "Visit XIPU AI",
+      "placeholder": "",
+      "href": "https://xipuai.xjtlu.edu.cn",
+      "visible": false
+    },
+    {
+      "i": 29,
+      "tag": "a",
+      "sel": "a",
+      "label": "../course/view.php?id=4428",
+      "placeholder": "",
+      "href": "../course/view.php?id=4428",
+      "visible": false
+    },
+    {
+      "i": 30,
+      "tag": "a",
+      "sel": "a.moveBtn",
+      "label": "Turnitin Check AY25-26",
+      "placeholder": "",
+      "href": "../course/view.php?id=4428",
+      "visible": false
+    },
+    {
+      "i": 31,
+      "tag": "a",
+      "sel": "a.sr-only.sr-only-focusable",
+      "label": "跳过 收藏的课程",
+      "placeholder": "",
+      "href": "#sb-6",
+      "visible": false
+    },
+    {
+      "i": 32,
+      "tag": "div",
+      "sel": "div#drawer-6a22deaa817a76a22deaa752457..drawer",
+      "label": "消息 联系人 选择的消息 1 × 联系人 0 有 0 个待处理的联系请求 设置 联系人 申请 0 有 0 个待处理的联系",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 33,
+      "tag": "a",
+      "sel": "a.text-dark.btn-link",
+      "label": "关闭",
+      "placeholder": "",
+      "href": "#",
+      "visible": true
+    },
+    {
+      "i": 34,
+      "tag": "input[type=text]",
+      "sel": "input.form-control",
+      "label": "搜索",
+      "placeholder": "搜索",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 35,
+      "tag": "a",
+      "sel": "a",
+      "label": "设置",
+      "placeholder": "",
+      "href": "#",
+      "visible": true
+    },
+    {
+      "i": 36,
+      "tag": "a",
+      "sel": "a",
+      "label": "联系人 0 有 0 个待处理的联系请求",
+      "placeholder": "",
+      "href": "#",
+      "visible": true
+    },
+    {
+      "i": 37,
+      "tag": "button",
+      "sel": "button.btn.btn-link",
+      "label": "已收藏 () 个会话总数 有 个未读对话",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 38,
+      "tag": "button",
+      "sel": "button.btn.btn-link",
+      "label": "小组 () 个会话总数 有 个未读对话",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 39,
+      "tag": "button",
+      "sel": "button.btn.btn-link",
+      "label": "私人 () 个会话总数 有 个未读对话",
+      "placeholder": "",
+      "href": "",
+      "visible": true
+    },
+    {
+      "i": 40,
+      "tag": "a",
+      "sel": "a",
+      "label": "查看所有",
+      "placeholder": "",
+      "href": "https://core.xjtlu.edu.cn/message/index.php",
+      "visible": true
+    }
+  ],
+  "visible": 33,
+  "total": 41
+}
