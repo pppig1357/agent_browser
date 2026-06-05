@@ -1,144 +1,234 @@
-# Agent Browser v1.1.0
+# Agent Browser v2.0.0
 
-基于 Playwright 的持久化浏览器工具，为 AI agent 提供可靠的浏览器自动化操作。
+> ❗ 本项目还在进行测试和debug中，等没bug了我会传Release（磕头）
+> 💡 懒人の奇思妙想之——让AI帮我代写Module Quiz（划掉）自动化浏览器操作工具
+
+基于 Playwright CDP 的独立浏览器，专为「不想手动点几百次网页」和「让 AI 替你在深夜里爬课件」而生。
+
+## 它怎么来的
+
+某个深夜，pppig 打开学校的 LMO，准备下载 CCT008 的 quiz。然后他发现：
+
+1. 要登录 ehall  
+2. ehall 跳 SSO  
+3. SSO 跳 SAML  
+4. SAML 跳 LMO  
+5. LMO 里点进课程  
+6. 找到资源页  
+7. 点击下载  
+
+一套流程下来，他已经忘了为什么要打开电脑（后期来自pppig的订正：纯懒癌发作所以决定找个理由搓轮椅就是，有签到助手了那我何乐而不为呢）。
+
+于是他说：「小龙虾，咱能不能一起写个脚本？」
+
+然后就有了 agent-browser。经历了 4 次被 SIGKILL 爆杀、user_data 反复损坏、Chrome 窗口在他的后台疯狂闪屏之后，它终于活到了 v2.0。
 
 ## 设计理念
 
-- **一次登录，永久使用** — 使用 `launch_persistent_context`，cookie 跨会话持久化
-- **链式操作为主，watch 为辅** — `do` 模式在同一 session 中跑完整条链，比 watch IPC 模式更可靠
-- **优雅降级** — click 有 3 级 fallback（Playwright → JS → href 导航），不怕 selector 环境差异
-- **最小依赖** — 只依赖 `playwright`，Python 标准库处理其余所有事情
+- **Chrome 活着，Python 随便死** — Chrome 作为独立进程运行，Python 进程被超时杀了也无所谓，下次重连就行。别问为什么强调这个，那是血泪教训
+- **一次登录，永久白嫖** — user_data 持久化 cookie/session，关掉重开照样在
+- **链式操作为主** — `do` 模式一个连接跑完一整条链，比反复连 CDP 省心
+- **优雅降级** — click 有 3 级 fallback（Playwright → JS → href 导航），不挑页面不挑框架
+- **最小依赖** — 只靠 `playwright`，剩下全是 Python 标准库。没装一千个 npm 包，就一个 .py 文件
+- **帝王引擎** — 懒惰使人进步（bushi）
+
+## 与 v1.x 的区别
+
+| | v1.x | v2.0 |
+|---|---|---|
+| Chrome 怎么跑的 | `launch_persistent_context`，跟 Python 绑死 | 独立进程，CDP `connect_over_cdp` |
+| Python 被杀会怎样 | user_data 损坏，下次直接崩 | Chrome 活得好好的 |
+| 需要手动启 Chrome | 不用（但也因此容易被杀） | 需要 `start`（do/watch 检测到没启动会自己帮你启） |
+| manual 超时 | 无上限，靠 OS 杀 | 默认 10min，可控 |
 
 ## 首次使用
 
-1. 安装依赖：
+1. 安装：
 ```bash
 pip install playwright
 playwright install chromium
 ```
 
-2. 启动 watch 模式，弹出 Chrome 窗口：
+2. 启动 Chrome：
 ```bash
-py scripts/agent_browser.py watch
+py scripts/agent_browser.py start
 ```
 
-3. 在 Chrome 窗口中手动登录目标网站（SSO 等）
-4. Cookie 自动持久化到 `user_data/`，后续操作复用登录态
-5. 测试是否正常：
+3. 在弹出的 Chrome 窗口里手动登录你的目标网站
+4. Cookie 自动存进 `user_data/`，重启 Chrome 也还在
+5. 测试：
 ```bash
 py scripts/agent_browser.py goto https://example.com
 py scripts/agent_browser.py state
 ```
 
-> 💡 `user_data/` 和 `logs/` 已加入 `.gitignore`，不会上传到仓库。首次运行时自动创建。
+> 💡 `user_data/` 和 `logs/` 在 `.gitignore` 里，不会上传。首次运行时自动创建。
 
 ## 快速开始
 
 ```bash
-# 安装依赖（如已完成可跳过）
-pip install playwright
-playwright install chromium
-
-# 测试
+pip install playwright && playwright install chromium
+py scripts/agent_browser.py start
 py scripts/agent_browser.py goto https://example.com
 py scripts/agent_browser.py state
 py scripts/agent_browser.py click 1
+py scripts/agent_browser.py stop
 ```
 
 ## 典型场景
 
-### 场景一：SSO 登录 → LMS 下载课件
+### 场景一：学校 SSO → LMS → 下载课件（就是它诞生的原因）
 
+```bash
+# 1. 启动 + 在 Chrome 里手动 SSO 登录
+py scripts/agent_browser.py start
+
+# 2. 执行下载链（登录态自动复用）
+py scripts/agent_browser.py do plan.json
+
+# 3. 关掉
+py scripts/agent_browser.py stop
+```
+
+plan.json：
 ```json
 [
   {"action": "goto", "args": ["https://lms.example.edu/login"]},
   {"action": "click", "args": ["1"]},
-  {"action": "manual", "args": ["请完成 SSO 登录"]},
+  {"action": "manual", "args": ["请完成 SSO 登录", "300"]},
   {"action": "goto", "args": ["https://lms.example.edu/my/courses"]},
   {"action": "state"},
-  {"action": "eval", "args": ["// 搜索目标课程链接"]},
+  {"action": "eval", "args": ["// 搜目标课程"]},
   {"action": "goto", "args": ["https://lms.example.edu/mod/resource/view.php?id=xxx"]},
   {"action": "download", "args": ["a[href*='.rar']", "./downloads/quiz.rar"]}
 ]
 ```
 
-### 场景二：iframe SPA 内操作
+### 场景二：iframe SPA（ehall 那种套娃页面）
 
 ```json
 [
   {"action": "goto", "args": ["https://portal.example.com"]},
   {"action": "wait", "args": ["5000"]},
-  {"action": "eval_iframe", "args": ["return document.querySelector('[aria-label*=\"课程中心\"]')?.parentElement?.click();"]},
+  {"action": "eval_iframe", "args": ["return document.querySelector('[aria-label*=\"目标入口\"]')?.parentElement?.click();"]},
   {"action": "wait", "args": ["3000"]}
 ]
 ```
 
-### 场景三：断点续跑
+### 场景三：断点续跑（链炸了不想从头来）
 
 ```bash
-# 第 3 步炸了？修好 plan.json 后从第 3 步继续
 py scripts/agent_browser.py do plan.json --resume-from=2
 ```
 
-## 经验教训
+### 场景四：长时间挂着不怕超时
+
+```bash
+py scripts/agent_browser.py start
+py scripts/agent_browser.py watch   # 后台 IPC 模式
+# 即使 watch 被超时杀了，Chrome 完好，再开一个 watch 继续用
+```
+
+## 吃过的亏（所以你别再吃）
 
 ### ✅ 该做的
 
-- **用 `do` 模式，不要用单独命令循环** — 每关一次浏览器就可能丢 cookie
-- **直接导航 URL 优于模拟点击** — 如果知道目标 URL，`goto` 永远比 `click + wait` 可靠
-- **用 `eval` 先探路再写 plan** — 盲写 click 索引是赌博
-- **做好 `--resume-from` 预案** — 长链一定会炸
+- **先 `start` 再操作** — Chrome 要独立活着，别每次命令都开个新浏览器
+- **`do` 优于单步命令** — 一个 CDP 连接跑完所有事，减少连接开销
+- **知道 URL 就 `goto`，别模拟点击** — `goto` 永远比 `click + wait` 可靠一万倍
+- **`eval` 探路再写 plan** — 盲写 click 索引 ≈ 盲人摸象
+- **`--resume-from` 做个预案** — 长链一定会炸，别不信
 
 ### ❌ 别做的
 
-- 别在 loop 里反复打开/关闭浏览器 — 单次 `do` 链完成所有事
-- 别依赖 CSS class 顺序 — Moodle/Canvas 等 LMS 换皮肤时 class 会变
-- 别用 `headless=True` 做复杂交互 — SSR 页面在 headless 下表现不同
-- 别把 `download` 写到单独脚本 — 必须用同一个 browser context 才能复用 session
+- 别反复 `start`/`stop` — Chrome 开着就行，又不吃你多少内存
+- 别在 plan 里靠 CSS class 定位 — LMS 换个皮肤你就凉了
+- 别开 `headless=True` 做复杂交互 — SSR 页面 headless 下就是另一个世界
+- 别把 `download` 写到独立进程 — 必须同一个 CDP 会话才有 session
 
 ## 命令速查
 
-| 单步命令 | `do` 模式 JSON | 说明 |
-|----------|---------------|------|
+| 管理 | 说明 |
+|------|------|
+| `start` | 启动 Chrome（独立进程，CDP 9222） |
+| `stop` | 优雅关闭 |
+
+| 操作 | `do` JSON | 说明 |
+|------|----------|------|
 | `goto URL` | `{"action":"goto","args":["URL"]}` | 打开网址 |
-| `state` | `{"action":"state"}` | 列出元素 |
+| `state` | `{"action":"state"}` | 列出交互元素 |
 | `click 3` | `{"action":"click","args":["3"]}` | 按索引点击 |
 | `click ".btn"` | `{"action":"click","args":[".btn"]}` | CSS 点击 |
-| `click ".link" --wait-nav` | `{"action":"click","args":[".link","--wait-nav"]}` | 点击等导航 |
+| `click ".link" --wait-nav` | `{"action":"click","args":[".link","--wait-nav"]}` | 点击等 SPA 跳转 |
 | `eval JS` | `{"action":"eval","args":["JS"]}` | 执行 JS |
-| `download URL PATH` | `{"action":"download","args":["URL","PATH"]}` | 下载文件 |
-| `manual message` | `{"action":"manual","args":["message"]}` | 人工介入 |
-| `wait 3000` | `{"action":"wait","args":["3000"]}` | 等待 ms |
+| `download URL [PATH]` | `{"action":"download","args":["URL","PATH"]}` | 下载文件 |
+| `manual msg [timeout_s]` | `{"action":"manual","args":["请登录","300"]}` | 人工介入 |
+| `wait 3000` | `{"action":"wait","args":["3000"]}` | 等 N 毫秒 |
 
 ## 架构
 
 ```
 skills/agent-browser/
-├── SKILL.md           # OpenClaw skill 定义
-├── README.md          # 本文档
+├── SKILL.md              # skill 定义
+├── README.md             # 你在看的这个
 ├── scripts/
-│   ├── agent_browser.py  # 主程序
-│   ├── state.json        # 最后的状态快照
-│   └── watch.pid         # watch 进程 PID
-├── user_data/            # Chrome profile (持久化)
+│   ├── agent_browser.py  # 唯一的代码文件
+│   ├── chrome.pid        # Chrome PID
+│   ├── .chrome_exe_path  # Chromium 路径缓存
+│   ├── state.json        # 当前页面状态快照
+│   ├── watch.pid         # watch 进程 PID
+│   ├── cmd.json          # watch IPC 指令
+│   └── resp.json         # watch IPC 响应
+├── user_data/            # Chrome profile（有 cookie，别传 git！）
 │   └── Default/
 │       ├── Cookies
 │       ├── Local Storage/
 │       └── ...
-└── logs/
+└── logs/                 # 指令日志（也不传 git）
     └── YYYY-MM-DD/
         └── commands.jsonl
 ```
 
+## 特别鸣谢
+
+> 没有下面这些人和事，这个项目可能还停留在「理论上可行」的阶段。
+
+### 🦞 小龙虾
+
+代码主体实现。从 v1.0 到 v2.0，从 Playwright 到 CDP，从 CSS selector 尾随句号到 3 级 click 降级，从被 SIGKILL 反复爆杀到「Chrome 独立存活」架构。深夜 debug 到自己都麻了，但就是不服。
+
+### 🐋 梁文峰大人
+
+\o/\o/\o/\o/\o/\o/\o/Deepseek的恩情还不完啊\o/\o/\o/\o/\o/\o/\o/\o/\o/\o/\o/\o/\o/\o/鲸挣恩大人我们永远追随你口阿\o/\o/\o/\o/\o/\o/\o/\o/\o/
+
+### 🌸 伊吹桑
+
+pppig 的编程社管理层成员。一次先修水课上给 pppig 看了他用的 **Astrbot** 以及 Astrbot 里的邮箱 skill——那个「bot 替你操作网页」的 idea 就是从这儿来的。没有那一刻的启发，agent-browser 可能根本不会开始。
+
+### 📧 学校那个掉渣的邮箱网址
+
+某大学邮件系统的 **Basic 主题**。因为pppig手贱把邮箱主题换成 Basic 渲染而锁死了页面上的所有交互元素，逼得我们不得不研究 `eval_iframe`、手动注入 JS 点击、以及各种绕过 iframe SPA 的偏方。谢谢你，让 click fallback 从 1 级变成了 3 级。
+
+### 🖼️ 学校 IT —「请输入文本.jpg」
+
+您可以在自定义菜单中切换表情（卡兹佬乱入） 简单讲就是 pppig 差点因为学校本地部署的 Exchange 2019 服务器按死在地上，如果不切换到 **Basic 主题** 还查不到有关信息说是，所以网址邮箱基本就是搭进去了。
+
+---
+
+*Made with ❤️ and a lot of `await asyncio.sleep(1)`*
+
 ## 版本历史
 
+### v2.0.0 (2026-06-06)
+- **架构重构**：Chrome 独立进程 + CDP `connect_over_cdp`，彻底告别 profile 损坏
+- **新命令**：`start` / `stop` 管理 Chrome 生命周期
+- **修复**：`manual` 增加 soft timeout（默认 600s）
+- **清理**：移除硬编码 URL、无用 cookie helper
+- **文档**：去掉个人信息，加入心路历程和特别鸣谢
+
 ### v1.1.0 (2026-06-05)
-- 修复 CSS selector 生成器 trailing dot bug（`filter(Boolean)`）
-- 修复空 `id` 属性产生非法 `#` 选择器
-- click-by-index 三级降级：Playwright → JS → href 导航
-- 新: `download` action（直接 URL 或 CSS 选择器触发下载）
-- 新: `do` 模式支持 `--resume-from=N` 断点续跑
-- 新: `click` 支持 `--wait-nav` 等待 SPA 页面跳转
+- 修复 CSS selector trailing dot、空 id 选择器
+- click 三级降级、`download` action、`--resume-from`、`--wait-nav`
 
 ### v1.0.0 (2026-06-05)
 - 初始版本：goto / state / click / type / press / screenshot / extract / scroll / eval / tabs / watch / do

@@ -1,8 +1,10 @@
 #!/usr/bin/env py
 # -*- coding: utf-8 -*-
 """
-Agent Browser v1.1.0 — AI-controllable persistent Chrome
+Agent Browser v2.0.0 — AI-controllable browser via CDP
 Usage:
+  py agent_browser.py start                # Launch independent Chrome
+  py agent_browser.py stop                 # Gracefully close Chrome
   py agent_browser.py goto <url>
   py agent_browser.py state
   py agent_browser.py click <n|selector>
@@ -16,13 +18,20 @@ Usage:
   py agent_browser.py wait <ms|selector>
   py agent_browser.py eval <js>
   py agent_browser.py tabs [list|switch <n>|new|close]
-  py agent_browser.py watch                # daemon mode (JSON stdin)
-  py agent_browser.py close
+  py agent_browser.py watch                # daemon mode (file IPC)
+  py agent_browser.py do <plan.json> [--resume-from=N]
+
+Architecture:
+  Chrome runs as an independent process (start/stop).
+  All other commands connect via CDP — process killed ≠ Chrome killed.
+  user_data/ persists cookies across sessions.
 """
 
 import asyncio
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -37,11 +46,15 @@ SCRIPT_DIR = Path(__file__).parent
 SKILL_DIR = SCRIPT_DIR.parent  # skills/agent-browser/
 USER_DATA = SKILL_DIR / "user_data"
 STATE_FILE = SCRIPT_DIR / "state.json"
-COOKIE_FILE = SCRIPT_DIR / ".browser_cookies.json"
 LOG_DIR = SKILL_DIR / "logs"
+CHROME_EXE_CACHE = SCRIPT_DIR / ".chrome_exe_path"
+PID_FILE = SCRIPT_DIR / "chrome.pid"
+CDP_PORT = 9222
+CDP_URL = f"http://localhost:{CDP_PORT}"
 
 USER_DATA.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # ────────────────── helpers ──────────────────
 
@@ -49,6 +62,7 @@ def _log_dir():
     d = LOG_DIR / datetime.now().strftime("%Y-%m-%d")
     d.mkdir(exist_ok=True)
     return d
+
 
 async def _log_cmd(action, args, result):
     """Append to commands.jsonl in daily log dir."""
@@ -67,6 +81,48 @@ async def _log_cmd(action, args, result):
         pass
 
 
+def _check_chrome_running():
+    """Quick sync check: is Chrome CDP reachable?"""
+    try:
+        import urllib.request
+        urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+async def _get_chrome_exe():
+    """Find Chromium path (cached)."""
+    if CHROME_EXE_CACHE.exists():
+        exe = CHROME_EXE_CACHE.read_text().strip()
+        if Path(exe).exists():
+            return exe
+    # Use Playwright to locate
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        exe = str(p.chromium.executable_path)
+    CHROME_EXE_CACHE.write_text(exe)
+    return exe
+
+
+async def _connect(p):
+    """Connect to running Chrome via CDP. Returns (browser, page)."""
+    browser = await p.chromium.connect_over_cdp(CDP_URL)
+    contexts = browser.contexts
+    if contexts:
+        ctx = contexts[0]
+        if ctx.pages:
+            page = ctx.pages[0]
+        else:
+            page = await ctx.new_page()
+    else:
+        ctx = await browser.new_context(
+            viewport={"width": 1280, "height": 800}, locale="zh-CN"
+        )
+        page = await ctx.new_page()
+    return browser, page
+
+
 # ────────────────── browser state extraction ──────────────────
 
 async def cmd_state(page):
@@ -80,7 +136,6 @@ async def cmd_state(page):
             if (idx >= 100) break;
             const rect = el.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) continue;
-
             const tag = el.tagName.toLowerCase();
             const type = el.getAttribute('type') || '';
             const id = el.id ? '#' + el.id : '';
@@ -91,11 +146,8 @@ async def cmd_state(page):
             const placeholder = el.getAttribute('placeholder') || '';
             const href = el.getAttribute('href') || '';
             const name = el.getAttribute('name') || '';
-            const role = el.getAttribute('role') || '';
             const aria = el.getAttribute('aria-label') || '';
-
             const label = text || placeholder || aria || href || name || (tag + type);
-
             items.push({
                 i: idx,
                 tag: tag + (type ? `[type=${type}]` : ''),
@@ -111,25 +163,16 @@ async def cmd_state(page):
     }""")
 
     state = {
-        "url": page.url,
-        "title": await page.title(),
-        "elements": elements,
-        "visible": len([e for e in elements if e["visible"]]),
-        "total": len(elements)
+        "url": page.url, "title": await page.title(), "elements": elements,
+        "visible": len([e for e in elements if e["visible"]]), "total": len(elements)
     }
-
-    # Save state
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-
     print(f"📍 {state['title']}")
     print(f"🔗 {state['url']}")
     print(f"🧩 {state['visible']}/{state['total']} 交互元素\n")
-
     for e in elements:
         marker = "👁" if e["visible"] else "⬇"
-        tag_info = e["tag"]
-        print(f"  [{e['i']}] {marker} {tag_info} | {e['label'][:70]}")
-
+        print(f"  [{e['i']}] {marker} {e['tag']} | {e['label'][:70]}")
     return {"ok": True, "state": state}
 
 
@@ -144,18 +187,15 @@ async def cmd_screenshot(page, name=None):
 async def cmd_extract(page, selector=None):
     if selector:
         try:
-            el = page.locator(selector).first
-            text = await el.inner_text()
+            text = await page.locator(selector).first.inner_text()
         except Exception:
             text = ""
         if not text:
-            text = await page.evaluate(f"""(sel) => {{
-                const el = document.querySelector(sel);
-                return el ? el.textContent.trim() : '';
-            }}""", selector)
+            text = await page.evaluate(
+                f"""(sel) => {{ const el=document.querySelector(sel);return el?el.textContent.trim():''; }}""",
+                selector)
     else:
         text = await page.evaluate("() => document.body.innerText")
-
     lines = text.strip().split("\n")[:200]
     result = "\n".join(lines)
     print(result[:8000])
@@ -167,10 +207,10 @@ async def cmd_html(page, selector=None):
         try:
             html = await page.locator(selector).first.inner_html()
         except Exception:
-            html = await page.evaluate(f"() => document.querySelector('{selector}')?.innerHTML || ''")
+            html = await page.evaluate(
+                f"() => document.querySelector('{selector}')?.innerHTML || ''")
     else:
         html = await page.content()
-
     print(html[:8000])
     return {"ok": True, "html_len": len(html)}
 
@@ -216,7 +256,6 @@ async def run_action(page, action, args):
     elif action == "click":
         target = args[0] if args else ""
         if target.isdigit():
-            # Click by state index
             idx = int(target)
             state_data = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
             elements = state_data.get("elements", [])
@@ -229,7 +268,8 @@ async def run_action(page, action, args):
                 except Exception:
                     try:
                         escaped = selector.replace("'", "\\'")
-                        await page.evaluate(f"const el=document.querySelector('{escaped}');if(el)el.click();else throw new Error('not found');")
+                        await page.evaluate(
+                            f"const el=document.querySelector('{escaped}');if(el)el.click();else throw new Error('not found');")
                     except Exception:
                         if href:
                             await page.goto(href, wait_until="domcontentloaded", timeout=15000)
@@ -241,20 +281,16 @@ async def run_action(page, action, args):
             else:
                 result = {"ok": False, "error": f"index {idx} out of range (0-{len(elements)-1})"}
         elif target.startswith("iframe:"):
-            # Click inside iframe: matches text, clicks closest clickable ancestor
             sel = target[7:]
             f = page.frame_locator("iframe")
             el = f.locator(f'[aria-label*="{sel}"]')
             if await el.count() > 0:
-                # Click the closest clickable ancestor (5 levels up to the tabindex div)
                 clickable = f.locator(f'[aria-label*="{sel}"]').locator('..').locator('..').locator('..').locator('..').locator('..')
-                # Verify it has tabindex
                 await clickable.first.click(timeout=5000, force=True)
             else:
                 await f.locator(f'text="{sel}"').first.click(timeout=5000, force=True)
             result["summary"] = f"clicked iframe element '{sel[:40]}'"
         else:
-            # Click by CSS selector; --wait-nav waits for page navigation after click
             loc = page.locator(target).first
             wait_nav = len(args) > 1 and args[1] == "--wait-nav"
             if wait_nav:
@@ -267,13 +303,11 @@ async def run_action(page, action, args):
         await asyncio.sleep(1)
 
     elif action == "type":
-        if len(args) >= 2 and args[0].startswith("#") or args[0].startswith(".") or args[0].startswith("["):
-            # selector + text
+        if len(args) >= 2 and (args[0].startswith("#") or args[0].startswith(".") or args[0].startswith("[")):
             sel, text = args[0], " ".join(args[1:])
             await page.locator(sel).first.fill(text, timeout=5000)
             result["summary"] = f"typed into {sel}"
         else:
-            # Just text into focused element
             text = " ".join(args)
             await page.keyboard.type(text)
             result["summary"] = f"typed '{text[:30]}'"
@@ -284,15 +318,20 @@ async def run_action(page, action, args):
         result["summary"] = f"pressed {key}"
 
     elif action == "manual":
-        # Pause for manual interaction, wait for signal file
         msg = args[0] if args else "请在浏览器中完成操作"
+        timeout_sec = int(args[1]) if len(args) > 1 else 600
         signal_file = SCRIPT_DIR / ".manual_done"
         if signal_file.exists():
             signal_file.unlink()
         print(f"\n👆 {msg}", flush=True)
-        print(f"⏳ 完成后我会通过信号文件通知继续...", flush=True)
+        print(f"⏳ 等待信号文件 (timeout: {timeout_sec}s)...", flush=True)
+        waited = 0
         while not signal_file.exists():
+            if waited >= timeout_sec:
+                result = {"ok": False, "error": f"manual step timed out after {timeout_sec}s"}
+                return result
             await asyncio.sleep(1)
+            waited += 1
         signal_file.unlink()
         result["summary"] = "manual step done"
 
@@ -306,11 +345,11 @@ async def run_action(page, action, args):
         result["summary"] = f"scrolled {direction} {px}px"
 
     elif action == "download":
-        # Click a link that triggers a download
         if args and args[0].startswith("http"):
-            # Direct URL: navigate and capture download
             url = args[0]
-            save_path = args[1] if len(args) > 1 else os.path.join(os.path.dirname(__file__), "..", "..", "..", "downloads", os.path.basename(url.rstrip("/").split("?")[0]))
+            save_path = args[1] if len(args) > 1 else os.path.join(
+                os.path.dirname(__file__), "..", "..", "..", "downloads",
+                os.path.basename(url.rstrip("/").split("?")[0]))
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             try:
                 async with page.expect_download(timeout=30000) as di:
@@ -322,10 +361,10 @@ async def run_action(page, action, args):
             except Exception as e:
                 result = {"ok": False, "error": f"download: {str(e)[:120]}"}
         else:
-            # Click selector to trigger download
             target = args[0] if args else "a[href*='.rar'], a[href*='.zip']"
             save_path = args[1] if len(args) > 1 else None
-            os.makedirs(os.path.join(os.path.dirname(__file__), "..", "..", "..", "downloads"), exist_ok=True)
+            dl_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "downloads")
+            os.makedirs(dl_dir, exist_ok=True)
             try:
                 async with page.expect_download(timeout=30000) as di:
                     await page.locator(target).first.click(timeout=5000)
@@ -333,7 +372,7 @@ async def run_action(page, action, args):
                 if save_path:
                     os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 else:
-                    save_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "downloads", download.suggested_filename)
+                    save_path = os.path.join(dl_dir, download.suggested_filename)
                 await download.save_as(save_path)
                 result["summary"] = f"downloaded {download.suggested_filename} ({os.path.getsize(save_path)} bytes)"
                 result["path"] = save_path
@@ -341,7 +380,6 @@ async def run_action(page, action, args):
                 result = {"ok": False, "error": f"download: {str(e)[:120]}"}
 
     elif action == "mouse_click":
-        # Click at absolute x,y coordinates
         x = int(args[0]) if len(args) > 0 else 0
         y = int(args[1]) if len(args) > 1 else 0
         await page.mouse.click(x, y)
@@ -354,7 +392,6 @@ async def run_action(page, action, args):
             await asyncio.sleep(ms / 1000)
             result["summary"] = f"waited {ms}ms"
         else:
-            # Wait for selector
             await page.wait_for_selector(target, timeout=10000)
             result["summary"] = f"waited for {target}"
 
@@ -374,14 +411,13 @@ async def run_action(page, action, args):
                 await new_page.bring_to_front()
                 result["summary"] = f"switched to tab {idx}"
         elif sub == "new":
-            new_page = await page.context.new_page()
+            await page.context.new_page()
             result["summary"] = "new tab opened"
         elif sub == "close":
             await page.close()
             result["summary"] = "tab closed"
 
     elif action == "eval_iframe":
-        # Run JS inside the first iframe
         js = " ".join(args)
         f = page.frame_locator("iframe")
         el = f.locator("html")
@@ -395,61 +431,107 @@ async def run_action(page, action, args):
 
     elif action == "close":
         result["summary"] = "closing browser"
-        # Handled in main
-
     else:
         result = {"ok": False, "error": f"unknown action: {action}"}
 
     return result
 
 
-# ────────────────── browser helpers ──────────────────
+# ────────────────── start / stop ──────────────────
 
-async def _save_cookies(context):
-    cookies = await context.cookies()
-    COOKIE_FILE.write_text(json.dumps(cookies, ensure_ascii=False), encoding="utf-8")
-
-
-async def _new_browser_context(p):
-    browser = await p.chromium.launch(
-        headless=False,
-        args=["--disable-blink-features=AutomationControlled"],
-    )
-    # Use default context (more stable than new_context on Windows)
-    context = None
-    if COOKIE_FILE.exists():
+async def cmd_start():
+    """Launch Chrome as an independent process with CDP enabled."""
+    if _check_chrome_running():
+        port_info = ""
         try:
-            cookies = json.loads(COOKIE_FILE.read_text(encoding="utf-8"))
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                locale="zh-CN",
-            )
-            await context.add_cookies(cookies)
+            import urllib.request
+            resp = json.loads(urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=2).read())
+            port_info = f" | {resp.get('Browser', 'Chrome')[:40]}"
         except Exception:
             pass
-    if not context:
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            locale="zh-CN",
-        )
-    return browser, context
+        print(f"🟢 Chrome 已在运行 (port {CDP_PORT}{port_info})")
+        return
+
+    chrome_exe = await _get_chrome_exe()
+    print(f"🔧 启动 Chrome: {chrome_exe}")
+
+    proc = subprocess.Popen(
+        [
+            chrome_exe,
+            f"--remote-debugging-port={CDP_PORT}",
+            f"--user-data-dir={USER_DATA}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=Translate",
+            "about:blank",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    PID_FILE.write_text(str(proc.pid))
+
+    # Wait for CDP to be ready
+    for i in range(60):
+        await asyncio.sleep(0.5)
+        if _check_chrome_running():
+            print(f"🟢 Chrome 已启动 (PID: {proc.pid}, port {CDP_PORT})")
+            print(f"📁 user_data: {USER_DATA}")
+            return
+
+    print("❌ Chrome 启动超时 (30s)")
+    PID_FILE.unlink(missing_ok=True)
+    sys.exit(1)
 
 
-# ────────────────── single command mode ──────────────────
+async def cmd_stop():
+    """Gracefully close Chrome via CDP, fallback to taskkill."""
+    if not _check_chrome_running():
+        print("ℹ️ Chrome 未运行")
+        PID_FILE.unlink(missing_ok=True)
+        return
+
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
+            # Close all contexts' pages then close browser
+            for ctx in browser.contexts:
+                for pg in ctx.pages:
+                    await pg.close()
+            await browser.close()
+    except Exception:
+        pass
+
+    # Fallback: kill by pid
+    try:
+        if PID_FILE.exists():
+            pid = int(PID_FILE.read_text().strip())
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                os.kill(pid, signal.SIGTERM)
+    except Exception:
+        pass
+
+    PID_FILE.unlink(missing_ok=True)
+    _check_chrome_running()  # wait
+    print("👋 Chrome 已关闭")
+
+
+# ────────────────── run modes ──────────────────
 
 async def run_single(action, args):
+    """Single command: connect → execute → disconnect."""
     from playwright.async_api import async_playwright
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=str(USER_DATA),
-            headless=False,
-            viewport={"width": 1280, "height": 800},
-            locale="zh-CN",
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        page = browser.pages[0] if browser.pages else await browser.new_page()
+    if not _check_chrome_running():
+        print("❌ Chrome 未运行。请先执行: py agent_browser.py start")
+        sys.exit(1)
 
+    async with async_playwright() as p:
+        browser, page = await _connect(p)
         result = await run_action(page, action, args)
         await _log_cmd(action, args, result)
 
@@ -459,116 +541,23 @@ async def run_single(action, args):
             else:
                 print(f"❌ {result.get('error', 'unknown error')}")
 
-        if action != "close":
-            await asyncio.sleep(1)
-
-        await browser.close()
-
     if not result.get("ok"):
         sys.exit(1)
 
 
-# ────────────────── watch mode (file-based IPC) ──────────────────
-
-CMD_FILE = SCRIPT_DIR / "cmd.json"
-RESP_FILE = SCRIPT_DIR / "resp.json"
-PID_FILE = SCRIPT_DIR / "watch.pid"
-
-
-async def run_watch():
-    from playwright.async_api import async_playwright
-
-    PID_FILE.write_text(str(os.getpid()))
-    if CMD_FILE.exists():
-        CMD_FILE.unlink()
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=str(USER_DATA),
-            headless=False,
-            viewport={"width": 1280, "height": 800},
-            locale="zh-CN",
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        page = browser.pages[0] if browser.pages else await browser.new_page()
-
-        # Navigate to ehall immediately to trigger SSO
-        print("🔗 Navigating to ehall...", flush=True)
-        await page.goto("https://ehall.xjtlu.edu.cn/default/index.html#/homeXS")
-        await asyncio.sleep(2)
-        print(f"📍 {page.url}", flush=True)
-
-        print("🟢 Agent Browser WATCH 已启动", flush=True)
-        print(f"📁 PID: {os.getpid()} | user_data: {USER_DATA}", flush=True)
-        print(f"📁 指令: {CMD_FILE}", flush=True)
-        print("READY", flush=True)
-
-        seq = 0
-        while True:
-            try:
-                if CMD_FILE.exists():
-                    try:
-                        cmd_raw = CMD_FILE.read_text(encoding="utf-8").strip()
-                        CMD_FILE.unlink()
-                        if not cmd_raw or cmd_raw == "exit":
-                            if cmd_raw == "exit":
-                                break
-                            continue
-                        cmd = json.loads(cmd_raw)
-                    except (json.JSONDecodeError, FileNotFoundError):
-                        continue
-
-                    action = cmd.get("action", "")
-                    args = cmd.get("args", [])
-
-                    result = await run_action(page, action, args)
-                    await _log_cmd(action, args, result)
-
-                    result["_seq"] = seq
-                    result["_action"] = action
-                    RESP_FILE.write_text(json.dumps(result, ensure_ascii=False, default=str),
-                                        encoding="utf-8")
-                    seq += 1
-
-                await asyncio.sleep(0.5)
-
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                err = {"_seq": seq, "ok": False, "error": str(e)}
-                RESP_FILE.write_text(json.dumps(err, ensure_ascii=False, default=str),
-                                    encoding="utf-8")
-                seq += 1
-
-        await browser.close()
-        PID_FILE.unlink(missing_ok=True)
-        print("👋 Bye", flush=True)
-
-
-# ────────────────── do mode (chain multiple actions in one session) ──────────────────
-
 async def run_chain(actions_file, resume_from=0):
-    """Chain multiple actions in one browser session.
-    actions_file: path to a JSON file with action list.
-    Format: [{"action": "goto", "args": ["url"]}, {"action": "state"}, ...]
-    """
+    """Chain multiple actions in one CDP connection."""
     from playwright.async_api import async_playwright
 
-    raw = Path(actions_file).read_text(encoding="utf-8")
-    # Strip leading/trailing array brackets if wrapped in them
-    raw = raw.strip()
+    raw = Path(actions_file).read_text(encoding="utf-8").strip()
     actions = json.loads(raw)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=str(USER_DATA),
-            headless=False,
-            viewport={"width": 1280, "height": 800},
-            locale="zh-CN",
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        page = browser.pages[0] if browser.pages else await browser.new_page()
+    if not _check_chrome_running():
+        print("❌ Chrome 未运行。正在自动启动...")
+        await cmd_start()
 
+    async with async_playwright() as p:
+        browser, page = await _connect(p)
         results = []
         for i, cmd in enumerate(actions):
             if i < resume_from:
@@ -584,15 +573,81 @@ async def run_chain(actions_file, resume_from=0):
                 print(f"❌ Stopping chain: {result.get('error', 'failed')}")
                 break
 
-        await browser.close()
-
-    # Print summary
     print(f"\n{'='*40}")
     for i, r in enumerate(results):
         status = "✅" if r.get("ok") else "❌"
         print(f"  [{i}] {status} {actions[i].get('action','')}: {r.get('summary', r.get('error',''))[:80]}")
-
     return results
+
+
+# ────────────────── watch mode (file-based IPC) ──────────────────
+
+CMD_FILE = SCRIPT_DIR / "cmd.json"
+RESP_FILE = SCRIPT_DIR / "resp.json"
+WATCH_PID_FILE = SCRIPT_DIR / "watch.pid"
+
+
+async def run_watch():
+    """Daemon: connect to existing Chrome, poll cmd.json for instructions."""
+    from playwright.async_api import async_playwright
+
+    WATCH_PID_FILE.write_text(str(os.getpid()))
+    if CMD_FILE.exists():
+        CMD_FILE.unlink()
+
+    if not _check_chrome_running():
+        print("🔧 Chrome 未运行，正在自动启动...", flush=True)
+        await cmd_start()
+
+    async with async_playwright() as p:
+        browser, page = await _connect(p)
+
+        print("🟢 Agent Browser WATCH 已启动", flush=True)
+        print(f"📁 PID: {os.getpid()} | user_data: {USER_DATA}", flush=True)
+        print(f"📁 指令: {CMD_FILE}", flush=True)
+        print("READY", flush=True)
+
+        seq = 0
+        while True:
+            try:
+                if CMD_FILE.exists():
+                    try:
+                        cmd_raw = CMD_FILE.read_text(encoding="utf-8").strip()
+                        CMD_FILE.unlink()
+                        if not cmd_raw:
+                            continue
+                        if cmd_raw == "exit":
+                            break
+                        cmd = json.loads(cmd_raw)
+                    except (json.JSONDecodeError, FileNotFoundError):
+                        continue
+
+                    action = cmd.get("action", "")
+                    args = cmd.get("args", [])
+
+                    result = await run_action(page, action, args)
+                    await _log_cmd(action, args, result)
+
+                    result["_seq"] = seq
+                    result["_action"] = action
+                    RESP_FILE.write_text(
+                        json.dumps(result, ensure_ascii=False, default=str),
+                        encoding="utf-8")
+                    seq += 1
+
+                await asyncio.sleep(0.5)
+
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                err = {"_seq": seq, "ok": False, "error": str(e)}
+                RESP_FILE.write_text(
+                    json.dumps(err, ensure_ascii=False, default=str),
+                    encoding="utf-8")
+                seq += 1
+
+        WATCH_PID_FILE.unlink(missing_ok=True)
+        print("👋 Bye", flush=True)
 
 
 # ────────────────── main ──────────────────
@@ -605,7 +660,11 @@ def main():
     action = sys.argv[1]
     args = sys.argv[2:]
 
-    if action == "watch":
+    if action == "start":
+        asyncio.run(cmd_start())
+    elif action == "stop":
+        asyncio.run(cmd_stop())
+    elif action == "watch":
         asyncio.run(run_watch())
     elif action == "do":
         resume_from = 0
