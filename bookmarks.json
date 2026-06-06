@@ -1,0 +1,26 @@
+[
+  {
+    "name": "XJTLU LMO",
+    "url": "https://core.xjtlu.edu.cn/",
+    "desc": "学校LMO课程系统",
+    "tags": []
+  },
+  {
+    "name": "XJTLU ehall",
+    "url": "https://ehall.xjtlu.edu.cn/",
+    "desc": "一站式服务大厅",
+    "tags": []
+  },
+  {
+    "name": "XJTLU 邮箱 OWA",
+    "url": "https://mail.xjtlu.edu.cn/owa/",
+    "desc": "Exchange 2019 网页邮箱 (建议直接用手机QQ邮箱)",
+    "tags": []
+  },
+  {
+    "name": "Example",
+    "url": "https://example.com/",
+    "desc": "测试用页面",
+    "tags": []
+  }
+]

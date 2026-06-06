@@ -1,4 +1,4 @@
-# Agent Browser v2.0.5
+# Agent Browser v2.1.0
 
 AI 可操控的独立 Chrome 浏览器（CDP 连接）。
 

@@ -3,7 +3,11 @@ logs/
 
 user_data/
 
-bookmarks.json
+# runtime files (generated at runtime, never commit)
+scripts/runtime/
+
+# bookmarks is user data, but can be shared as template
+# bookmarks.json
 
 screenshots/
 downloads/

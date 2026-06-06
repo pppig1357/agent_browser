@@ -1,7 +1,7 @@
 #!/usr/bin/env py
 # -*- coding: utf-8 -*-
 """
-Agent Browser v2.0.5 — AI-controllable browser via CDP
+Agent Browser v2.1.0 — AI-controllable browser via CDP
 Usage:
   py agent_browser.py start                # Launch independent Chrome
   py agent_browser.py stop                 # Gracefully close Chrome
@@ -44,18 +44,20 @@ except Exception:
 
 SCRIPT_DIR = Path(__file__).parent
 SKILL_DIR = SCRIPT_DIR.parent  # skills/agent-browser/
+RUNTIME_DIR = SCRIPT_DIR / "runtime"  # v2.1.0: runtime files live here
 USER_DATA = SKILL_DIR / "user_data"
 SCREENSHOTS_DIR = SKILL_DIR / "screenshots"
 DOWNLOADS_DIR = SKILL_DIR / "downloads"
-STATE_FILE = SCRIPT_DIR / "state.json"
+STATE_FILE = RUNTIME_DIR / "state.json"
 BOOKMARKS_FILE = SKILL_DIR / "bookmarks.json"
 LOG_DIR = SKILL_DIR / "logs"
-CHROME_EXE_CACHE = SCRIPT_DIR / ".chrome_exe_path"
-PID_FILE = SCRIPT_DIR / "chrome.pid"
+CHROME_EXE_CACHE = RUNTIME_DIR / ".chrome_exe_path"
+PID_FILE = RUNTIME_DIR / "chrome.pid"
 CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}"
 
 USER_DATA.mkdir(parents=True, exist_ok=True)
+RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -454,7 +456,7 @@ async def run_action(page, action, args):
     elif action == "manual":
         msg = args[0] if args else "请在浏览器中完成操作"
         timeout_sec = int(args[1]) if len(args) > 1 else 600
-        signal_file = SCRIPT_DIR / ".manual_done"
+        signal_file = RUNTIME_DIR / ".manual_done"
         if signal_file.exists():
             signal_file.unlink()
         print(f"\n👆 {msg}", flush=True)
@@ -712,9 +714,9 @@ async def run_chain(actions_file, resume_from=0):
 
 # ────────────────── watch mode (file-based IPC) ──────────────────
 
-CMD_FILE = SCRIPT_DIR / "cmd.json"
-RESP_FILE = SCRIPT_DIR / "resp.json"
-WATCH_PID_FILE = SCRIPT_DIR / "watch.pid"
+CMD_FILE = RUNTIME_DIR / "cmd.json"
+RESP_FILE = RUNTIME_DIR / "resp.json"
+WATCH_PID_FILE = RUNTIME_DIR / "watch.pid"
 
 
 async def run_watch():
