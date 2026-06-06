@@ -1,7 +1,7 @@
 #!/usr/bin/env py
 # -*- coding: utf-8 -*-
 """
-Agent Browser v2.0.4 — AI-controllable browser via CDP
+Agent Browser v2.0.5 — AI-controllable browser via CDP
 Usage:
   py agent_browser.py start                # Launch independent Chrome
   py agent_browser.py stop                 # Gracefully close Chrome
@@ -45,6 +45,8 @@ except Exception:
 SCRIPT_DIR = Path(__file__).parent
 SKILL_DIR = SCRIPT_DIR.parent  # skills/agent-browser/
 USER_DATA = SKILL_DIR / "user_data"
+SCREENSHOTS_DIR = SKILL_DIR / "screenshots"
+DOWNLOADS_DIR = SKILL_DIR / "downloads"
 STATE_FILE = SCRIPT_DIR / "state.json"
 BOOKMARKS_FILE = SKILL_DIR / "bookmarks.json"
 LOG_DIR = SKILL_DIR / "logs"
@@ -54,6 +56,8 @@ CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}"
 
 USER_DATA.mkdir(parents=True, exist_ok=True)
+SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -178,9 +182,20 @@ async def cmd_state(page):
 
 
 async def cmd_screenshot(page, name=None):
-    # v2.0.2: wrap in timeout to prevent indefinite hang on heavy SPAs (OWA etc.)
-    filename = name or f"screenshot_{int(time.time())}"
-    path = str(SCRIPT_DIR / f"{filename}.jpg")
+    # v2.0.5: screenshots go to SKILL_DIR/screenshots/, named YYYYMMDD_HHMMSS_sitename.jpg
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if name:
+        site_label = name
+    else:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(page.url).hostname or "page"
+            site_label = host.replace("www.", "").split(".")[0]
+        except Exception:
+            site_label = "page"
+    filename = f"{ts}_{site_label}"
+    path = str(SCREENSHOTS_DIR / f"{filename}.jpg")
     print("📸 capturing...", flush=True)
     try:
         data = await asyncio.wait_for(page.screenshot(type="jpeg", quality=85, full_page=False), timeout=15)
@@ -466,9 +481,7 @@ async def run_action(page, action, args):
     elif action == "download":
         if args and args[0].startswith("http"):
             url = args[0]
-            save_path = args[1] if len(args) > 1 else os.path.join(
-                os.path.dirname(__file__), "..", "..", "..", "downloads",
-                os.path.basename(url.rstrip("/").split("?")[0]))
+            save_path = args[1] if len(args) > 1 else str(DOWNLOADS_DIR / os.path.basename(url.rstrip("/").split("?")[0]))
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             try:
                 async with page.expect_download(timeout=30000) as di:
@@ -482,8 +495,6 @@ async def run_action(page, action, args):
         else:
             target = args[0] if args else "a[href*='.rar'], a[href*='.zip']"
             save_path = args[1] if len(args) > 1 else None
-            dl_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "downloads")
-            os.makedirs(dl_dir, exist_ok=True)
             try:
                 async with page.expect_download(timeout=30000) as di:
                     await page.locator(target).first.click(timeout=5000)
@@ -491,7 +502,7 @@ async def run_action(page, action, args):
                 if save_path:
                     os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 else:
-                    save_path = os.path.join(dl_dir, download.suggested_filename)
+                    save_path = str(DOWNLOADS_DIR / download.suggested_filename)
                 await download.save_as(save_path)
                 result["summary"] = f"downloaded {download.suggested_filename} ({os.path.getsize(save_path)} bytes)"
                 result["path"] = save_path

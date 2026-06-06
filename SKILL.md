@@ -1,4 +1,4 @@
-# Agent Browser v2.0.4
+# Agent Browser v2.0.5
 
 AI 可操控的独立 Chrome 浏览器（CDP 连接）。
 
@@ -83,6 +83,8 @@ py scripts/agent_browser.py watch
 - `scripts/state.json` — 当前交互元素列表（state 命令更新）
 - `scripts/chrome.pid` — Chrome 进程 PID
 - `scripts/watch.pid` — watch 守护进程 PID
+- `screenshots/` — 截图存档（命名：YYYYMMDD_HHMMSS_网站名.jpg）
+- `downloads/` — 下载文件目录
 - `user_data/` — Chrome profile（cookie/session 持久化）
 - `logs/YYYY-MM-DD/commands.jsonl` — 每日指令日志
 
