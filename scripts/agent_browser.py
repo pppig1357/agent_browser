@@ -1,7 +1,7 @@
 #!/usr/bin/env py
 # -*- coding: utf-8 -*-
 """
-Agent Browser v2.0.0 — AI-controllable browser via CDP
+Agent Browser v2.0.4 — AI-controllable browser via CDP
 Usage:
   py agent_browser.py start                # Launch independent Chrome
   py agent_browser.py stop                 # Gracefully close Chrome
@@ -46,6 +46,7 @@ SCRIPT_DIR = Path(__file__).parent
 SKILL_DIR = SCRIPT_DIR.parent  # skills/agent-browser/
 USER_DATA = SKILL_DIR / "user_data"
 STATE_FILE = SCRIPT_DIR / "state.json"
+BOOKMARKS_FILE = SKILL_DIR / "bookmarks.json"
 LOG_DIR = SKILL_DIR / "logs"
 CHROME_EXE_CACHE = SCRIPT_DIR / ".chrome_exe_path"
 PID_FILE = SCRIPT_DIR / "chrome.pid"
@@ -177,11 +178,18 @@ async def cmd_state(page):
 
 
 async def cmd_screenshot(page, name=None):
+    # v2.0.2: wrap in timeout to prevent indefinite hang on heavy SPAs (OWA etc.)
     filename = name or f"screenshot_{int(time.time())}"
     path = str(SCRIPT_DIR / f"{filename}.jpg")
-    await page.screenshot(path=path, type="jpeg", quality=85, full_page=False)
-    print(f"📸 {path}")
-    return {"ok": True, "path": path}
+    print("📸 capturing...", flush=True)
+    try:
+        data = await asyncio.wait_for(page.screenshot(type="jpeg", quality=85, full_page=False), timeout=15)
+        Path(path).write_bytes(data)
+        print(f"📸 {path}")
+        return {"ok": True, "path": path}
+    except asyncio.TimeoutError:
+        print("⚠️ Screenshot timed out", flush=True)
+        return {"ok": False, "error": "screenshot timed out after 15s"}
 
 
 async def cmd_extract(page, selector=None):
@@ -216,9 +224,93 @@ async def cmd_html(page, selector=None):
 
 
 async def cmd_eval(page, js):
-    result = await page.evaluate(f"() => {{ {js} }}")
+    # v2.0.1: direct evaluate (arrow wrapper with block body had no return → always null)
+    result = await page.evaluate(js)
     print(json.dumps(result, ensure_ascii=False, default=str))
     return {"ok": True, "result": result}
+
+
+# ────────────────── bookmarks ──────────────────
+
+def _load_bookmarks():
+    """Load bookmarks list from JSON file."""
+    if BOOKMARKS_FILE.exists():
+        try:
+            return json.loads(BOOKMARKS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+    return []
+
+
+def _save_bookmarks(bookmarks):
+    BOOKMARKS_FILE.write_text(
+        json.dumps(bookmarks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def cmd_bookmarks(args):
+    """Manage bookmarks. Usage:
+      bookmarks                         list all
+      bookmarks add <name> <url> [desc] add a bookmark
+      bookmarks search <keyword>        search by name/desc
+      bookmarks remove <n>              remove bookmark by index
+    """
+    bookmarks = _load_bookmarks()
+    sub = args[0] if args else "list"
+
+    if sub == "list":
+        if not bookmarks:
+            print("📑 暂无书签")
+            return {"ok": True, "bookmarks": []}
+        print(f"📑 {len(bookmarks)} 个书签:\n")
+        for i, b in enumerate(bookmarks):
+            tags = ", ".join(b.get("tags", []))
+            tag_str = f" [{tags}]" if tags else ""
+            print(f"  [{i}] {b['name']}{tag_str}")
+            print(f"      {b['url']}")
+            if b.get("desc"):
+                print(f"      {b['desc']}")
+        return {"ok": True, "bookmarks": bookmarks}
+
+    elif sub == "add":
+        if len(args) < 3:
+            return {"ok": False, "error": "用法: bookmarks add <名称> <URL> [描述]"}
+        name, url = args[1], args[2]
+        desc = " ".join(args[3:]) if len(args) > 3 else ""
+        bookmarks.append({"name": name, "url": url, "desc": desc, "tags": []})
+        _save_bookmarks(bookmarks)
+        print(f"✅ 已添加书签: {name}")
+        return {"ok": True, "action": "add", "name": name}
+
+    elif sub == "search":
+        if len(args) < 2:
+            return {"ok": False, "error": "用法: bookmarks search <关键词>"}
+        keyword = args[1].lower()
+        results = [b for b in bookmarks if
+                   keyword in b["name"].lower()
+                   or keyword in b.get("desc", "").lower()
+                   or any(keyword in t.lower() for t in b.get("tags", []))]
+        if not results:
+            print(f"🔍 未找到匹配 '{keyword}' 的书签")
+            return {"ok": True, "matches": []}
+        print(f"🔍 找到 {len(results)} 个匹配:\n")
+        for i, b in enumerate(results):
+            print(f"  [{i}] {b['name']} — {b['url']}")
+            if b.get("desc"):
+                print(f"      {b['desc']}")
+        return {"ok": True, "matches": results}
+
+    elif sub == "remove":
+        if len(args) < 2 or not args[1].isdigit():
+            return {"ok": False, "error": "用法: bookmarks remove <序号>"}
+        idx = int(args[1])
+        if idx < 0 or idx >= len(bookmarks):
+            return {"ok": False, "error": f"序号 {idx} 超出范围 (0-{len(bookmarks)-1})"}
+        removed = bookmarks.pop(idx)
+        _save_bookmarks(bookmarks)
+        print(f"🗑️ 已移除: {removed['name']}")
+        return {"ok": True, "action": "remove", "name": removed["name"]}
+
+    return {"ok": False, "error": f"未知子命令: {sub}"}
 
 
 # ────────────────── main dispatcher ──────────────────
@@ -300,6 +392,33 @@ async def run_action(page, action, args):
             else:
                 await loc.click(timeout=5000)
                 result["summary"] = f"clicked {target}"
+        await asyncio.sleep(1)
+
+    elif action == "dblclick":
+        # v2.0.3: double-click for SPAs that need it (OWA opens email on dblclick)
+        target = args[0] if args else ""
+        if target.isdigit():
+            idx = int(target)
+            state_data = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
+            elements = state_data.get("elements", [])
+            if idx < len(elements):
+                selector = elements[idx]["sel"]
+                label = elements[idx]["label"]
+                try:
+                    await page.locator(selector).first.dblclick(timeout=5000)
+                except Exception:
+                    # fallback: JS dblclick event
+                    escaped = selector.replace("'", "\\'")
+                    await page.evaluate(
+                        f"const el=document.querySelector('{escaped}');"
+                        f"if(el){{el.dispatchEvent(new MouseEvent('dblclick',{{bubbles:true,cancelable:true,view:window}}));}}"
+                        f"else{{throw new Error('not found');}}")
+                result["summary"] = f"double-clicked [{idx}] {label}"
+            else:
+                result = {"ok": False, "error": f"index {idx} out of range (0-{len(elements)-1})"}
+        else:
+            await page.locator(target).first.dblclick(timeout=5000)
+            result["summary"] = f"double-clicked {target}"
         await asyncio.sleep(1)
 
     elif action == "type":
@@ -676,6 +795,11 @@ def main():
                 remaining.append(a)
         if remaining:
             asyncio.run(run_chain(remaining[0], resume_from))
+    elif action == "bookmarks":
+        result = cmd_bookmarks(args)
+        if not result.get("ok"):
+            print(f"❌ {result.get('error', 'unknown error')}")
+            sys.exit(1)
     else:
         asyncio.run(run_single(action, args))
 

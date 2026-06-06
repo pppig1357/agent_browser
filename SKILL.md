@@ -1,4 +1,4 @@
-# Agent Browser v2.0.0
+# Agent Browser v2.0.4
 
 AI 可操控的独立 Chrome 浏览器（CDP 连接）。
 
@@ -38,6 +38,8 @@ py skills/agent-browser/scripts/agent_browser.py <action> [args...]
 | `tabs list` | 标签页列表 | `tabs list` |
 | `tabs switch <n>` | 切换标签页 | `tabs switch 1` |
 | `tabs new` | 新标签页 | `tabs new` |
+| `dblclick <n>` | 双击元素（SPA/OWA 专用） | `dblclick 3` |
+| `dblclick "<sel>"` | 双击 CSS 选择器 | `dblclick ".subject"` |
 | `close` | 关闭当前标签页 | `close` |
 
 ## Do 模式（链式执行）
@@ -108,6 +110,19 @@ Chrome 关闭后 cookie 依然保留（持久化 profile）。
 - Chrome 作为**独立进程**运行，不随 Python 进程绑定
 - 即使 Python 进程被超时杀死，Chrome 完好无损，user_data 永不损坏
 - 通过 `connect_over_cdp` 连接，不再使用 `launch_persistent_context`
+
+## 书签 📑
+
+v2.0.4 新增书签功能，存储常用网站方便快速调用：
+
+| 命令 | 说明 |
+|------|------|
+| `bookmarks` | 列出所有书签 |
+| `bookmarks add <名称> <URL> [描述]` | 添加书签 |
+| `bookmarks search <关键词>` | 搜索书签 |
+| `bookmarks remove <序号>` | 删除书签 |
+
+书签文件：`skills/agent-browser/bookmarks.json`（可手动编辑）
 
 ## 安全
 
