@@ -1,7 +1,7 @@
 #!/usr/bin/env py
 # -*- coding: utf-8 -*-
 """
-Agent Browser v2.1.0 — AI-controllable browser via CDP
+Agent Browser v2.1.1 — AI-controllable browser via CDP
 Usage:
   py agent_browser.py start                # Launch independent Chrome
   py agent_browser.py stop                 # Gracefully close Chrome
@@ -18,6 +18,7 @@ Usage:
   py agent_browser.py wait <ms|selector>
   py agent_browser.py eval <js>
   py agent_browser.py tabs [list|switch <n>|new|close]
+  py agent_browser.py pdf_save [url] [save_path]  # Save PDF to local
   py agent_browser.py watch                # daemon mode (file IPC)
   py agent_browser.py do <plan.json> [--resume-from=N]
 
@@ -560,6 +561,46 @@ async def run_action(page, action, args):
 
     elif action == "eval":
         return await cmd_eval(page, " ".join(args))
+
+    elif action == "pdf_save":
+        # Determine URL and save path
+        if args and args[0].startswith("http"):
+            pdf_url = args[0]
+            save_path = args[1] if len(args) > 1 else None
+        else:
+            pdf_url = page.url
+            save_path = args[0] if args else None
+
+        if not save_path:
+            from urllib.parse import urlparse, unquote
+            parsed = urlparse(pdf_url)
+            filename = unquote(os.path.basename(parsed.path)) or "document.pdf"
+            if not filename.lower().endswith('.pdf'):
+                filename += '.pdf'
+            save_path = str(DOWNLOADS_DIR / filename)
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        try:
+            import base64
+            pdf_bytes_b64 = await page.evaluate("""async (url) => {
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const blob = await resp.blob();
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result.split(',')[1]);
+                    reader.onerror = () => reject(new Error('FileReader failed'));
+                    reader.readAsDataURL(blob);
+                });
+            }""", pdf_url)
+            pdf_bytes = base64.b64decode(pdf_bytes_b64)
+            Path(save_path).write_bytes(pdf_bytes)
+            size = len(pdf_bytes)
+            print(f"📄 PDF 已保存: {save_path} ({size:,} bytes)")
+            result = {"ok": True, "path": save_path, "size": size, "summary": f"PDF saved ({size:,} bytes)"}
+        except Exception as e:
+            result = {"ok": False, "error": f"PDF save failed: {str(e)[:120]}"}
 
     elif action == "close":
         result["summary"] = "closing browser"

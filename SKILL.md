@@ -1,4 +1,4 @@
-# Agent Browser v2.1.0
+# Agent Browser v2.1.1
 
 AI 可操控的独立 Chrome 浏览器（CDP 连接）。
 
@@ -42,6 +42,23 @@ py skills/agent-browser/scripts/agent_browser.py <action> [args...]
 | `dblclick "<sel>"` | 双击 CSS 选择器 | `dblclick ".subject"` |
 | `close` | 关闭当前标签页 | `close` |
 
+## PDF 保存 📄
+
+Chrome 内置 PDF 查看器无法被脚本交互。`pdf_save` 通过 JS fetch 获取原始 PDF 字节并保存到本地：
+
+```bash
+# 保存当前页面
+py agent_browser.py pdf_save
+
+# 直接下载指定 PDF URL
+py agent_browser.py pdf_save https://example.com/doc.pdf
+
+# 指定保存路径
+py agent_browser.py pdf_save https://example.com/doc.pdf C:\myfile.pdf
+```
+
+文件默认保存到 `downloads/` 目录。
+
 ## Do 模式（链式执行）
 
 ```
@@ -80,11 +97,11 @@ py scripts/agent_browser.py watch
 
 ## 状态文件
 
-- `scripts/state.json` — 当前交互元素列表（state 命令更新）
-- `scripts/chrome.pid` — Chrome 进程 PID
-- `scripts/watch.pid` — watch 守护进程 PID
+- `scripts/runtime/state.json` — 当前交互元素列表（state 命令更新）
+- `scripts/runtime/chrome.pid` — Chrome 进程 PID
+- `scripts/runtime/watch.pid` — watch 守护进程 PID
 - `screenshots/` — 截图存档（命名：YYYYMMDD_HHMMSS_网站名.jpg）
-- `downloads/` — 下载文件目录
+- `downloads/` — 下载文件和 PDF 保存目录
 - `user_data/` — Chrome profile（cookie/session 持久化）
 - `logs/YYYY-MM-DD/commands.jsonl` — 每日指令日志
 
@@ -93,6 +110,7 @@ py scripts/agent_browser.py watch
 | 动作 | 说明 |
 |------|------|
 | `download <url> [save_path]` | 下载文件（直接 URL 或 CSS 选择器触发） |
+| `pdf_save [url] [path]` | 保存 PDF 到本地（绕过 Chrome 内置 PDF 查看器） |
 | `manual <message> [timeout_s]` | 暂停等待人工介入（默认 600s 超时），完成后创建 `.manual_done` |
 | `mouse_click <x> <y>` | 绝对坐标点击 |
 | `eval_iframe <js>` | 在第一个 iframe 内执行 JS |
@@ -131,3 +149,10 @@ v2.0.4 新增书签功能，存储常用网站方便快速调用：
 - 不访问 file:// / localhost / 内网地址
 - 密码字段内容不记录日志
 - `user_data/` 和 `logs/` 已在 .gitignore 中
+
+## 版本历史
+
+- **v2.1.1** (2026-06-11): 新增 `pdf_save` 命令 + Bug 修复（`FileReader` 替代 `btoa`）
+- **v2.1.0**: 重构为 runtime/ 目录
+- **v2.0.x**: CDP 独立进程架构、bookmarks、截图优化
+- 详见 git log

@@ -14,6 +14,7 @@
 | [iframe 套娃页面](#场景四iframe-套娃页面) | ehall、老后台系统 | ⭐⭐ |
 | [断点续跑：链炸了不重来](#场景五断点续跑链炸了不重来) | 长链容灾 | ⭐ |
 | [长时间挂着不怕超时](#场景六长时间挂着不怕超时) | 后台常驻、watch 模式 | ⭐⭐ |
+| [PDF 另存为：绕过内置查看器](#场景七pdf-另存为绕过内置查看器) | Chrome 打开 PDF 后无法交互 | ⭐ |
 
 ---
 
@@ -197,6 +198,50 @@ py scripts/agent_browser.py bookmarks                  # 列出所有书签
 py scripts/agent_browser.py bookmarks add "3DM" URL    # 添加
 py scripts/agent_browser.py bookmarks search "学校"    # 搜索
 ```
+
+---
+
+## 场景七：PDF 另存为（绕过内置查看器）
+
+> 2026-06-11 实战：LMO → EAP045 Module Handbook（766KB），SSO 认证直链一次保存成功
+
+**你面对的是什么：**
+
+Chrome 自带 PDF 查看器（`chrome-extension://` 或 `pluginfile.php` 直链），页面上的 PDF 直接在浏览器里预览——但脚本对它无能为力！`state` 看不到 PDF 内容，`click` 点不了里面的按钮，`extract` 拿不到文字。
+
+**`pdf_save` 是如何绕过的：**
+
+不跟 PDF 查看器较劲，直接走 JS `fetch()` 拿原始 PDF 字节，通过 `FileReader.readAsDataURL` 转 base64，Python 解码写本地文件。
+
+**实战步骤：**
+
+1. 先找到 PDF 链接（Moodle 的 `pluginfile.php` 直链藏在 resource 页面里）
+```bash
+py agent_browser.py start
+py agent_browser.py goto https://core.xjtlu.edu.cn/course/view.php?id=5498
+py agent_browser.py eval "Array.from(document.querySelectorAll('a')).filter(function(a){return a.href.includes('.pdf')}).map(function(a){return a.href})"
+# → ["https://core.xjtlu.edu.cn/pluginfile.php/139292/..."]
+```
+
+2. 一个命令保存到本地
+```bash
+py agent_browser.py pdf_save "https://core.xjtlu.edu.cn/pluginfile.php/139292/mod_resource/content/1/EAP045%20Module%20Handbook%20Semester%202%202025-26.pdf"
+# → 📄 PDF 已保存: downloads/EAP045 Module Handbook Semester 2 2025-26.pdf (766,880 bytes)
+```
+
+3. 或者直接保存当前页面（如果你已经导航到了 PDF）
+```bash
+py agent_browser.py pdf_save
+```
+
+**实现细节：**
+- 初版用 `btoa` + `TextDecoder('latin1')` 对大 PDF 不稳定（非 ASCII 字节导致 `btoa` 抛异常）
+- 终版用 `FileReader.readAsDataURL` — 浏览器原生 base64，零字节损坏，稳如老狗
+- `pdf_save` 在 `do` 模式下也能用：`{"action":"pdf_save","args":["https://...pdf"]}`
+
+**注意事项：**
+- PDF URL 如果需要 cookie/SSO 认证，必须在同一 CDP 会话里 `pdf_save`（当前正在用的浏览器窗口里有 session）
+- 大 PDF（>50MB）可能因为 base64 串过大导致 JS 内存压力，但学校课件级别的 PDF 毫无压力
 
 ---
 
