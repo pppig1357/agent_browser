@@ -1,0 +1,52 @@
+[
+  {
+    "action": "goto",
+    "args": ["https://example.com"],
+    "_desc": "1. 正常 — 打开 example.com"
+  },
+  {
+    "action": "click",
+    "args": ["#not-exist-99999"],
+    "on_error": "skip",
+    "_desc": "2. skip — 元素不存在，跳过继续"
+  },
+  {
+    "action": "click",
+    "args": ["#also-not-there"],
+    "on_error": "fallback",
+    "fallback": {
+      "action": "eval",
+      "args": ["'fallback_worked'"]
+    },
+    "_desc": "3. fallback — 点击失败→用eval补救"
+  },
+  {
+    "action": "eval",
+    "args": ["'step4_after_fallback'"],
+    "_desc": "4. 验证 — 链没断，继续跑"
+  },
+  {
+    "action": "click",
+    "args": [998],
+    "on_error": "retry",
+    "retry": 2,
+    "retry_delay_ms": 500,
+    "_desc": "5. retry — 重试2次仍失败，但不暂停"
+  },
+  {
+    "action": "eval",
+    "args": ["'all_strategies_verified'"],
+    "_desc": "6. 验证 — retry失败后链仍继续"
+  },
+  {
+    "action": "click",
+    "args": [999],
+    "on_error": "stop",
+    "_desc": "7. stop — 默认行为，立即终止"
+  },
+  {
+    "action": "eval",
+    "args": ["'SHOULD_NOT_RUN'"],
+    "_desc": "8. 这步不应执行（第7步stop了）"
+  }
+]

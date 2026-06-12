@@ -1,0 +1,27 @@
+[
+  {
+    "title": "A Call to Action: Stop the FCC's KYC Regime",
+    "url": "https://blog.lopp.net/call-to-action-stop-the-fcc-kyc-regime/",
+    "site": "lopp.net"
+  },
+  {
+    "title": "WASI 0.3.0 Released",
+    "url": "https://github.com/WebAssembly/WASI/releases/tag/v0.3.0",
+    "site": "github.com/webassembly"
+  },
+  {
+    "title": "AI agent bankrupted their operator while trying to scan DN42",
+    "url": "https://lantian.pub/en/article/fun/ai-agent-bankrupted-their-operator-scan-dn42lantian.lantian/",
+    "site": "lantian.pub"
+  },
+  {
+    "title": "Slightly reducing the sloppiness of AI generated front end",
+    "url": "https://envs.net/~volpe/blog/posts/reduce-slop.html",
+    "site": "envs.net"
+  },
+  {
+    "title": "Show HN: Script to bulk delete Claude chats from the web UI",
+    "url": "https://github.com/MatteoLeonesi/bulk-delete-claude-chat",
+    "site": "github.com/matteoleonesi"
+  }
+]

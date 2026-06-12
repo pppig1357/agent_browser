@@ -1,7 +1,7 @@
 #!/usr/bin/env py
 # -*- coding: utf-8 -*-
 """
-Agent Browser v2.1.1 — AI-controllable browser via CDP
+Agent Browser v2.1.5 — AI-controllable browser via CDP
 Usage:
   py agent_browser.py start                # Launch independent Chrome
   py agent_browser.py stop                 # Gracefully close Chrome
@@ -12,20 +12,27 @@ Usage:
   py agent_browser.py type <selector> <text>
   py agent_browser.py press <key>
   py agent_browser.py screenshot [name]
-  py agent_browser.py extract [selector]
+  py agent_browser.py extract [selector]   # plain text or structured (JSON config)
+  py agent_browser.py md [save_path]       # convert page to markdown
   py agent_browser.py html [selector]
   py agent_browser.py scroll <up|down> [px]
-  py agent_browser.py wait <ms|selector>
+  py agent_browser.py wait <ms|selector>               # legacy
+  py agent_browser.py wait --text <text>                # wait until text appears
+  py agent_browser.py wait --js <expression>            # wait for JS condition
+  py agent_browser.py wait --network-idle               # wait for network idle
+  py agent_browser.py wait --title <text>               # wait for title
+  py agent_browser.py wait --url <pattern>              # wait for URL match
   py agent_browser.py eval <js>
   py agent_browser.py tabs [list|switch <n>|new|close]
   py agent_browser.py pdf_save [url] [save_path]  # Save PDF to local
   py agent_browser.py watch                # daemon mode (file IPC)
-  py agent_browser.py do <plan.json> [--resume-from=N]
+  py agent_browser.py do <plan.json> [--resume-from=N]  # do chain with error recovery
 
 Architecture:
   Chrome runs as an independent process (start/stop).
   All other commands connect via CDP — process killed ≠ Chrome killed.
   user_data/ persists cookies across sessions.
+  log/YYYY-MM-DD/history.md tracks browsing history.
 """
 
 import asyncio
@@ -87,6 +94,115 @@ async def _log_cmd(action, args, result):
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
+
+def _history_file():
+    """Ensure log/YYYY-MM-DD/history.md exists, return Path."""
+    d = _log_dir()
+    p = d / "history.md"
+    if not p.exists():
+        today = datetime.now().strftime("%Y-%m-%d")
+        p.write_text(
+            f"# 🧭 浏览记录 — {today}\n\n"
+            f"| # | 时间 | 标题 | URL |\n"
+            f"|---|------|------|-----|\n",
+            encoding="utf-8")
+    return p
+
+
+def _append_history(url, title, screenshot_path=None):
+    """Append a row to today's history.md."""
+    try:
+        p = _history_file()
+        now = datetime.now().strftime("%H:%M:%S")
+        # Count existing rows (skip header lines)
+        lines = p.read_text(encoding="utf-8").strip().split("\n")
+        row_count = sum(1 for l in lines if l.startswith("|") and not l.startswith("|---") and "标题" not in l)
+        idx = row_count + 1
+        # Truncate title for table
+        short_title = title[:60].replace("|", "\\|").replace("\n", " ")
+        ss_cell = f"[📸]({screenshot_path.replace(chr(92), '/')})" if screenshot_path else "—"
+        row = f"| {idx} | {now} | {short_title} | {url} |\n"
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(row)
+    except Exception:
+        pass
+
+
+# ── v2.1.5: page-to-markdown JS (injected via CDP) ──
+
+_PAGE_TO_MD_JS = r"""
+(() => {
+  const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','IFRAME','SVG','NAV','FOOTER','HEADER','META','LINK']);
+  const BLOCK = new Set(['P','DIV','SECTION','ARTICLE','MAIN','ASIDE','LI','TD','TH','BLOCKQUOTE','PRE','H1','H2','H3','H4','H5','H6','UL','OL','TABLE','HR','FIGURE','FIGCAPTION','DETAILS','SUMMARY','FORM','FIELDSET']);
+  let out = '';
+  const seen = new Set();
+
+  function walk(el, depth) {
+    if (!el || depth > 30) return;
+    if (el.nodeType === 3) {
+      const t = el.textContent.replace(/\s+/g, ' ');
+      if (t && t !== ' ') out += t;
+      return;
+    }
+    if (el.nodeType !== 1) return;
+    if (seen.has(el)) return;
+    seen.add(el);
+    const tag = el.tagName;
+    if (SKIP.has(tag)) return;
+
+    // Inline formatting
+    if (tag === 'A') {
+      const href = el.getAttribute('href') || '';
+      const abs = href && (href.startsWith('http') || href.startsWith('/')) ? href : '';
+      const prev = out.length;
+      for (const c of el.childNodes) walk(c, depth+1);
+      const text = out.slice(prev).trim();
+      out = out.slice(0, prev);
+      if (text && abs) out += '[' + text + '](' + abs + ')';
+      else if (text) out += text;
+      return;
+    }
+    if (tag === 'STRONG' || tag === 'B') { out += '**'; for (const c of el.childNodes) walk(c, depth+1); out += '**'; return; }
+    if (tag === 'EM' || tag === 'I') { out += '*'; for (const c of el.childNodes) walk(c, depth+1); out += '*'; return; }
+    if (tag === 'CODE' && !BLOCK.has(el.parentElement?.tagName||'')) { out += '`'; for (const c of el.childNodes) walk(c, depth+1); out += '`'; return; }
+    if (tag === 'IMG') { const src=el.getAttribute('src')||'', alt=el.getAttribute('alt')||''; if(src) out += '\n!['+alt+']('+src+')\n'; return; }
+    if (tag === 'BR') { out += '\n'; return; }
+    if (tag === 'HR') { out += '\n\n---\n\n'; return; }
+
+    // Block elements
+    const isBlock = BLOCK.has(tag);
+    if (isBlock) {
+      const before = out.length;
+      const tagBefore = out;
+      for (const c of el.childNodes) walk(c, depth+1);
+      let content = out.slice(before).trim();
+      // Remove nested block markers
+      content = content.replace(/\n{3,}/g, '\n\n');
+      if (!content) return;
+
+      if (tag === 'H1') out = out.slice(0, before) + '\n\n# ' + content + '\n';
+      else if (tag === 'H2') out = out.slice(0, before) + '\n\n## ' + content + '\n';
+      else if (tag === 'H3') out = out.slice(0, before) + '\n\n### ' + content + '\n';
+      else if (tag === 'H4') out = out.slice(0, before) + '\n\n#### ' + content + '\n';
+      else if (tag === 'H5') out = out.slice(0, before) + '\n\n##### ' + content + '\n';
+      else if (tag === 'H6') out = out.slice(0, before) + '\n\n###### ' + content + '\n';
+      else if (tag === 'LI') out = out.slice(0, before) + '- ' + content + '\n';
+      else if (tag === 'BLOCKQUOTE') out = out.slice(0, before) + '\n> ' + content.replace(/\n/g, '\n> ') + '\n';
+      else if (tag === 'PRE') out = out.slice(0, before) + '\n```\n' + (el.textContent||'').trim() + '\n```\n';
+      else out = out.slice(0, before) + '\n\n' + content + '\n';
+    } else {
+      for (const c of el.childNodes) walk(c, depth+1);
+    }
+  }
+
+  // Start from main content area or body
+  const root = document.querySelector('article, main, [role="main"]') || document.body;
+  walk(root, 0);
+  // Post-process: collapse blank lines
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+})()
+"""
 
 
 def _check_chrome_running():
@@ -228,6 +344,74 @@ async def cmd_extract(page, selector=None):
     return {"ok": True, "text": result[:2000], "lines": len(lines)}
 
 
+async def cmd_md(page, save_path=None):
+    """v2.1.5: Convert current page to Markdown."""
+    try:
+        md = await page.evaluate(_PAGE_TO_MD_JS)
+    except Exception as e:
+        return {"ok": False, "error": f"md conversion failed: {str(e)[:120]}"}
+
+    if save_path:
+        Path(save_path).write_text(md, encoding="utf-8")
+        print(f"📝 Markdown 已保存: {save_path} ({len(md):,} chars)")
+    else:
+        print(md[:8000])
+    return {"ok": True, "md": md[:5000], "len": len(md), "path": save_path}
+
+
+async def cmd_extract_structured(page, container, fields, limit=None, output_file=None):
+    """v2.1.5: Extract structured data using container + field selectors.
+
+    fields: dict like {"title": "h2 a", "url": "h2 a @href", "date": ".date"}
+    Supports @attr suffix to extract attribute values.
+    """
+    try:
+        items = await page.evaluate("""
+            (cfg) => {
+                const containers = document.querySelectorAll(cfg.container);
+                const results = [];
+                const max = cfg.limit ? Math.min(cfg.limit, containers.length) : containers.length;
+                for (let i = 0; i < max; i++) {
+                    const el = containers[i];
+                    const item = {};
+                    for (const [key, sel] of Object.entries(cfg.fields)) {
+                        const attrMatch = sel.match(/^(.+?)\\s*@(\\w+)$/);
+                        if (attrMatch) {
+                            const sub = el.querySelector(attrMatch[1]);
+                            item[key] = sub ? (sub.getAttribute(attrMatch[2]) || '').trim() : '';
+                        } else {
+                            const sub = el.querySelector(sel);
+                            item[key] = sub ? sub.textContent.trim().replace(/\\s+/g, ' ') : '';
+                        }
+                    }
+                    results.push(item);
+                }
+                return results;
+            }
+        """, {"container": container, "fields": fields, "limit": limit})
+    except Exception as e:
+        return {"ok": False, "error": f"structured extract failed: {str(e)[:120]}"}
+
+    # Print summary
+    print(f"📊 提取了 {len(items)} 条记录")
+    for i, item in enumerate(items[:5]):
+        preview = {k: v[:60] if isinstance(v, str) else v for k, v in item.items()}
+        print(f"  [{i}] {json.dumps(preview, ensure_ascii=False)}")
+    if len(items) > 5:
+        print(f"  ... 还有 {len(items) - 5} 条")
+
+    # Save to file if specified
+    if output_file:
+        out_path = Path(output_file)
+        if not out_path.is_absolute():
+            out_path = SKILL_DIR / output_file
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"💾 已保存: {out_path}")
+
+    return {"ok": True, "items": items, "count": len(items), "path": str(output_file) if output_file else None}
+
+
 async def cmd_html(page, selector=None):
     if selector:
         try:
@@ -333,8 +517,10 @@ def cmd_bookmarks(args):
 
 # ────────────────── main dispatcher ──────────────────
 
-async def run_action(page, action, args):
-    """Execute one action, return result dict."""
+async def run_action(page, action, args, extras=None):
+    """Execute one action, return result dict.
+    extras: optional dict with additional params (used in do chains for schema, container, etc.)
+    """
     result = {"ok": True}
 
     if action == "goto":
@@ -347,6 +533,8 @@ async def run_action(page, action, args):
         print(f"📍 {title}")
         print(f"🔗 {page.url}")
         result["summary"] = f"{title} | {page.url}"
+        # v2.1.5: log to browsing history
+        _append_history(page.url, title)
 
     elif action == "state":
         return await cmd_state(page)
@@ -356,6 +544,23 @@ async def run_action(page, action, args):
         return await cmd_screenshot(page, name)
 
     elif action == "extract":
+        # v2.1.5: structured extraction if container+fields provided (in extras for do chains, or args[0] as JSON)
+        container = (extras or {}).get("container")
+        fields = (extras or {}).get("fields")
+        limit = (extras or {}).get("limit")
+        output_file = (extras or {}).get("output")
+        # Fallback: try first arg as JSON config
+        if not container and args:
+            try:
+                cfg = json.loads(args[0])
+                container = cfg.get("container")
+                fields = cfg.get("fields")
+                limit = cfg.get("limit")
+                output_file = cfg.get("output")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if container and fields:
+            return await cmd_extract_structured(page, container, fields, limit, output_file)
         sel = args[0] if args else None
         return await cmd_extract(page, sel)
 
@@ -364,7 +569,7 @@ async def run_action(page, action, args):
         return await cmd_html(page, sel)
 
     elif action == "click":
-        target = args[0] if args else ""
+        target = str(args[0]) if args else ""
         if target.isdigit():
             idx = int(target)
             state_data = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
@@ -414,7 +619,7 @@ async def run_action(page, action, args):
 
     elif action == "dblclick":
         # v2.0.3: double-click for SPAs that need it (OWA opens email on dblclick)
-        target = args[0] if args else ""
+        target = str(args[0]) if args else ""
         if target.isdigit():
             idx = int(target)
             state_data = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
@@ -519,14 +724,64 @@ async def run_action(page, action, args):
         result["summary"] = f"mouse click at ({x}, {y})"
 
     elif action == "wait":
-        target = args[0] if args else "2000"
-        if target.isdigit():
-            ms = int(target)
-            await asyncio.sleep(ms / 1000)
-            result["summary"] = f"waited {ms}ms"
+        # v2.1.5: extended conditional wait
+        if args and isinstance(args[0], dict):
+            # Do chain mode: structured config
+            cfg = args[0]
+            kind = cfg.get("kind", "")
+            value = cfg.get("value", "")
+            timeout = cfg.get("timeout", 30000)
+        elif args and str(args[0]).startswith("--"):
+            # CLI flag mode
+            flag_map = {"--text": "text", "--js": "js", "--network-idle": "network_idle",
+                        "--title": "title", "--url": "url"}
+            kind = flag_map.get(str(args[0]), "")
+            value = str(args[1]) if len(args) > 1 else ""
+            timeout = 30000
         else:
-            await page.wait_for_selector(target, timeout=10000)
-            result["summary"] = f"waited for {target}"
+            # Legacy: wait ms or selector
+            target = str(args[0]) if args else "2000"
+            if target.isdigit():
+                ms = int(target)
+                await asyncio.sleep(ms / 1000)
+                result["summary"] = f"waited {ms}ms"
+                return result
+            else:
+                await page.wait_for_selector(target, timeout=10000)
+                result["summary"] = f"waited for {target}"
+                return result
+
+        # Conditional wait implementations
+        if kind == "text":
+            await page.wait_for_function(
+                f"""() => document.body.innerText.includes({json.dumps(value)})""", timeout=timeout)
+            result["summary"] = f"waited for text '{value[:40]}'"
+        elif kind == "js":
+            await page.wait_for_function(value, timeout=timeout)
+            result["summary"] = "waited for js condition"
+        elif kind == "network_idle":
+            await page.wait_for_load_state("networkidle", timeout=timeout)
+            result["summary"] = "waited for network idle"
+        elif kind == "title":
+            if value:
+                await page.wait_for_function(
+                    f"""() => document.title.includes({json.dumps(value)})""", timeout=timeout)
+            else:
+                old_title = await page.title()
+                await page.wait_for_function(
+                    f"""() => document.title !== {json.dumps(old_title)}""", timeout=timeout)
+            result["summary"] = f"waited for title '{value[:40]}'"
+        elif kind == "url":
+            if value:
+                pattern = value if value.startswith("http") else f"**{value}**"
+                await page.wait_for_url(pattern, timeout=timeout)
+            else:
+                old_url = page.url
+                await page.wait_for_function(
+                    f"""() => window.location.href !== {json.dumps(old_url)}""", timeout=timeout)
+            result["summary"] = f"waited for url '{value[:40]}'"
+        else:
+            result = {"ok": False, "error": f"unknown wait kind: {kind}"}
 
     elif action == "tabs":
         sub = args[0] if args else "list"
@@ -561,6 +816,11 @@ async def run_action(page, action, args):
 
     elif action == "eval":
         return await cmd_eval(page, " ".join(args))
+
+    elif action == "md":
+        # v2.1.5: convert current page to markdown
+        save_path = args[0] if args else None
+        return await cmd_md(page, save_path)
 
     elif action == "pdf_save":
         # Determine URL and save path
@@ -718,20 +978,98 @@ async def run_single(action, args):
         sys.exit(1)
 
 
+async def _handle_error(page, cmd, result):
+    """Apply error recovery strategy for a failed step.
+    Returns (final_result, should_stop).
+    """
+    on_error = cmd.get("on_error", "stop")  # default: stop (backward compatible)
+    extras = {k: v for k, v in cmd.items() if k not in ("action", "args", "on_error", "fallback", "retry", "retry_delay_ms")}
+
+    if on_error == "stop":
+        return result, True
+
+    elif on_error == "skip":
+        print(f"⚠️  Error skipped: {result.get('error','')[:60]}")
+        result["_recovered"] = "skip"
+        return result, False
+
+    elif on_error == "retry":
+        max_retries = cmd.get("retry", 1)
+        delay_ms = cmd.get("retry_delay_ms", 2000)
+        for attempt in range(1, max_retries + 1):
+            print(f"🔄 Retry {attempt}/{max_retries} after {delay_ms}ms...")
+            await asyncio.sleep(delay_ms / 1000)
+            action = cmd.get("action", "")
+            args = cmd.get("args", [])
+            result = await run_action(page, action, args)
+            if result.get("ok"):
+                result["_recovered"] = f"retry_{attempt}"
+                print(f"✅ Retry {attempt} succeeded")
+                return result, False
+        print(f"❌ All {max_retries} retries failed")
+        result["_recovered"] = "retry_exhausted"
+        return result, False
+
+    elif on_error == "fallback":
+        fallback = cmd.get("fallback")
+        if fallback and isinstance(fallback, dict):
+            fb_action = fallback.get("action", "")
+            fb_args = fallback.get("args", [])
+            print(f"🔀 Fallback: {fb_action} {' '.join(fb_args)[:40]}")
+            try:
+                fb_result = await run_action(page, fb_action, fb_args)
+                if fb_result.get("ok"):
+                    result["_recovered"] = "fallback_ok"
+                    result["_fallback_summary"] = fb_result.get("summary", "")
+                    print(f"✅ Fallback succeeded: {fb_result.get('summary','')[:60]}")
+                    return result, False
+                else:
+                    result["_recovered"] = "fallback_failed"
+                    result["_fallback_error"] = fb_result.get("error", "")
+                    print(f"❌ Fallback also failed: {fb_result.get('error','')[:60]}")
+            except Exception as e:
+                result["_recovered"] = "fallback_error"
+                result["_fallback_error"] = str(e)[:120]
+                print(f"❌ Fallback exception: {e}")
+        else:
+            print(f"⚠️  on_error=fallback but no fallback action defined")
+            result["_recovered"] = "fallback_missing"
+        return result, False
+
+    else:
+        print(f"⚠️  Unknown on_error='{on_error}', treating as 'stop'")
+        return result, True
+
+
 async def run_chain(actions_file, resume_from=0):
-    """Chain multiple actions in one CDP connection."""
+    """Chain multiple actions in one CDP connection.
+
+    Per-step error handling (new in v2.1.4):
+      "on_error": "stop"    — halt the chain (default, backward compatible)
+      "on_error": "skip"    — log error and continue
+      "on_error": "retry"   — retry N times (use "retry" and "retry_delay_ms")
+      "on_error": "fallback" — execute fallback action if main fails
+
+    Structured extraction (new in v2.1.5):
+      {"action":"extract","container":"article.item","fields":{"title":"h2 a","url":"h2 a @href"},"limit":10,"output":"items.json"}
+
+    Example:
+      {"action":"click","args":["5"],"on_error":"retry","retry":2,"retry_delay_ms":3000}
+      {"action":"click","args":["#submit"],"on_error":"fallback","fallback":{"action":"press","args":["Enter"]}}
+    """
     from playwright.async_api import async_playwright
 
     raw = Path(actions_file).read_text(encoding="utf-8").strip()
     actions = json.loads(raw)
 
     if not _check_chrome_running():
-        print("❌ Chrome 未运行。正在自动启动...")
+        print("🔧 Chrome 未运行，正在自动启动...")
         await cmd_start()
 
     async with async_playwright() as p:
         browser, page = await _connect(p)
         results = []
+        stopped = False
         for i, cmd in enumerate(actions):
             if i < resume_from:
                 print(f"\n── [{i+1}/{len(actions)}] {cmd.get('action','')} (skipped) ──")
@@ -739,17 +1077,43 @@ async def run_chain(actions_file, resume_from=0):
                 continue
             action = cmd.get("action", "")
             args = cmd.get("args", [])
-            print(f"\n── [{i+1}/{len(actions)}] {action} {' '.join(args)[:50]} ──")
-            result = await run_action(page, action, args)
-            results.append(result)
-            if not result.get("ok"):
-                print(f"❌ Stopping chain: {result.get('error', 'failed')}")
-                break
+            print(f"\n── [{i+1}/{len(actions)}] {action} {' '.join(str(a) for a in args)[:50]} ──")
 
+            # v2.1.5: pass extra keys as extras for structured extract, etc.
+            extras = {k: v for k, v in cmd.items() if k not in ("action", "args", "on_error", "fallback", "retry", "retry_delay_ms")}
+            try:
+                result = await run_action(page, action, args, extras)
+            except Exception as e:
+                result = {"ok": False, "error": str(e)[:200]}
+
+            # Apply error recovery if failed
+            if not result.get("ok"):
+                print(f"❌ Failed: {result.get('error','')[:80]}")
+                result, should_stop = await _handle_error(page, cmd, result)
+                results.append(result)
+                if should_stop:
+                    print(f"🛑 Chain stopped at step {i+1}")
+                    stopped = True
+                    break
+            else:
+                results.append(result)
+
+        if not stopped:
+            ok_count = sum(1 for r in results if r.get("ok"))
+            recovered = sum(1 for r in results if r.get("_recovered"))
+            print(f"\n🎉 Chain complete: {ok_count}/{len(results)} steps ok" + (f" ({recovered} recovered)" if recovered else ""))
+
+    total = len(actions)
+    ok_count = sum(1 for r in results if r.get("ok"))
+    recovered = sum(1 for r in results if r.get("_recovered"))
     print(f"\n{'='*40}")
+    print(f"📊 {ok_count}/{len(results)} of {total} steps ok" + (f" ({recovered} recovered)" if recovered else ""))
     for i, r in enumerate(results):
+        rec = f" [↻ {r['_recovered']}]" if r.get("_recovered") else ""
         status = "✅" if r.get("ok") else "❌"
-        print(f"  [{i}] {status} {actions[i].get('action','')}: {r.get('summary', r.get('error',''))[:80]}")
+        summary = r.get('summary', r.get('error',''))[:80]
+        extra = r.get('_skip') and " (skipped)" or ""
+        print(f"  [{i}] {status}{rec} {actions[i].get('action','')}: {summary}{extra}")
     return results
 
 

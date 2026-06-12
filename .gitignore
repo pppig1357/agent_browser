@@ -7,7 +7,7 @@ user_data/
 scripts/runtime/
 
 # bookmarks is user data, but can be shared as template
-# bookmarks.json
+bookmarks.json
 
 screenshots/
 downloads/

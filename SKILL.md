@@ -1,4 +1,4 @@
-# Agent Browser v2.1.1
+# Agent Browser v2.1.5
 
 AI 可操控的独立 Chrome 浏览器（CDP 连接）。
 
@@ -30,10 +30,16 @@ py skills/agent-browser/scripts/agent_browser.py <action> [args...]
 | `type "<sel>" "<text>"` | 输入到指定元素 | `type "#search" "关键词"` |
 | `press <key>` | 按键 | `press Enter` |
 | `screenshot [name]` | 截图 (jpg) | `screenshot inbox` |
-| `extract [sel]` | 提取文本 | `extract div.content` |
+| `extract [sel]` | 提取文本（或结构化提取，见下方） | `extract div.content` |
+| `md [save_path]` | 页面转 Markdown | `md page.md` |
 | `html [sel]` | 提取 HTML | `html table.lvw` |
 | `scroll <up/down> [px]` | 滚动 | `scroll down 500` |
-| `wait <ms|sel>` | 等待 | `wait 2000` |
+| `wait <ms\|sel>` | 等待毫秒或选择器出现 | `wait 2000` |
+| `wait --text "..."` | 等待页面出现指定文字 | `wait --text "登录成功"` |
+| `wait --js "expr"` | 等待 JS 条件成立 | `wait --js ".items.length > 5"` |
+| `wait --network-idle` | 等待网络空闲 | `wait --network-idle` |
+| `wait --title "..."` | 等待页面标题变化 | `wait --title "控制台"` |
+| `wait --url "..."` | 等待 URL 匹配 | `wait --url "/dashboard"` |
 | `eval <js>` | 执行 JS | `eval document.title` |
 | `tabs list` | 标签页列表 | `tabs list` |
 | `tabs switch <n>` | 切换标签页 | `tabs switch 1` |
@@ -59,7 +65,100 @@ py agent_browser.py pdf_save https://example.com/doc.pdf C:\myfile.pdf
 
 文件默认保存到 `downloads/` 目录。
 
+## Markdown 转换 📝
+
+`md` 命令将当前页面转换为 Markdown，保留标题、链接、列表、图片等结构：
+
+```bash
+# 打印到 stdout
+py agent_browser.py md
+
+# 保存到文件
+py agent_browser.py md page.md
+```
+
+适用场景：提取页面正文给 AI 阅读，存档备查。
+
+## 结构化提取 📊
+
+从列表页批量提取字段，输出 JSON：
+
+```bash
+# CLI 模式：传入 JSON 配置
+py agent_browser.py extract '{"container":"article.item","fields":{"title":"h2 a","url":"h2 a @href"},"limit":10,"output":"items.json"}'
+```
+
+**Do 链模式**（推荐）：
+```json
+[
+  {"action": "goto", "args": ["https://news.ycombinator.com"]},
+  {
+    "action": "extract",
+    "container": "tr.athing",
+    "fields": {
+      "title": ".titleline a",
+      "url": ".titleline a @href",
+      "site": ".sitestr"
+    },
+    "limit": 10,
+    "output": "hn_top10.json"
+  }
+]
+```
+
+**字段选择器语法**：
+- `"h2 a"` — 取 textContent
+- `"h2 a @href"` — 取 href 属性
+- `"h2 a @data-id"` — 任意属性均可
+
+**输出**：
+```json
+[
+  {"title": "Show HN: My Project", "url": "https://...", "site": "github.com"},
+  ...
+]
+```
+
+## 浏览记录 📜
+
+每次 `goto` 自动记录到 `logs/YYYY-MM-DD/history.md`：
+
+```markdown
+# 🧭 浏览记录 — 2026-06-13
+
+| # | 时间 | 标题 | URL |
+|---|------|------|-----|
+| 1 | 00:15 | Hacker News | https://news.ycombinator.com |
+| 2 | 00:18 | Example Domain | https://example.com |
+```
+
 ## Do 模式（链式执行）
+
+### 条件等待 ⏳
+
+`wait` 支持多种条件等待，在 do 链中用法：
+
+```json
+// 等待文字出现
+{"action": "wait", "args": [{"kind": "text", "value": "加载完成"}]}
+
+// 等待 JS 条件成立
+{"action": "wait", "args": [{"kind": "js", "value": "document.readyState === 'complete'"}]}
+
+// 等待网络空闲（SPA 数据加载完毕）
+{"action": "wait", "args": [{"kind": "network_idle"}]}
+
+// 等待标题变化（可指定值或不指定等待任意变化）
+{"action": "wait", "args": [{"kind": "title", "value": "控制台"}]}
+
+// 等待 URL 匹配
+{"action": "wait", "args": [{"kind": "url", "value": "/dashboard"}]}
+
+// 自定义超时（默认 30s）
+{"action": "wait", "args": [{"kind": "text", "value": "确认", "timeout": 15000}]}
+```
+
+### Do 模式
 
 ```
 # 从 JSON 文件执行多步链
@@ -104,6 +203,7 @@ py scripts/agent_browser.py watch
 - `downloads/` — 下载文件和 PDF 保存目录
 - `user_data/` — Chrome profile（cookie/session 持久化）
 - `logs/YYYY-MM-DD/commands.jsonl` — 每日指令日志
+- `logs/YYYY-MM-DD/history.md` — 每日浏览记录
 
 ## 特殊动作
 
@@ -152,6 +252,8 @@ v2.0.4 新增书签功能，存储常用网站方便快速调用：
 
 ## 版本历史
 
+- **v2.1.5** (2026-06-13): `md` 命令、结构化提取、浏览记录、条件等待（text/js/network_idle/title/url）
+- **v2.1.4** (2026-06-11): do 链错误恢复（on_error: stop/skip/retry/fallback）
 - **v2.1.1** (2026-06-11): 新增 `pdf_save` 命令 + Bug 修复（`FileReader` 替代 `btoa`）
 - **v2.1.0**: 重构为 runtime/ 目录
 - **v2.0.x**: CDP 独立进程架构、bookmarks、截图优化

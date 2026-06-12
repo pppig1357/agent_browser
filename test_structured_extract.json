@@ -1,0 +1,24 @@
+[
+  {
+    "action": "goto",
+    "args": ["https://news.ycombinator.com"],
+    "_desc": "1. 打开 HN 首页"
+  },
+  {
+    "action": "extract",
+    "container": "tr.athing",
+    "fields": {
+      "title": ".titleline a",
+      "url": ".titleline a @href",
+      "site": ".sitestr"
+    },
+    "limit": 5,
+    "output": "hn_top5.json",
+    "_desc": "2. 结构化提取 — 前5条标题+链接+站点"
+  },
+  {
+    "action": "md",
+    "args": [],
+    "_desc": "3. 打印页面 MD (验证 md 命令)"
+  }
+]

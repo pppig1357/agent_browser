@@ -1,0 +1,37 @@
+[
+  {
+    "action": "goto",
+    "args": ["https://example.com"],
+    "_desc": "1. 打开 example.com"
+  },
+  {
+    "action": "wait",
+    "args": [{"kind": "text", "value": "Example"}],
+    "_desc": "2. 等待出现 'Example' 文字"
+  },
+  {
+    "action": "wait",
+    "args": [{"kind": "title", "value": "Example"}],
+    "_desc": "3. 等待标题包含 'Example'"
+  },
+  {
+    "action": "wait",
+    "args": [{"kind": "url", "value": "example.com"}],
+    "_desc": "4. 等待 URL 包含 example.com"
+  },
+  {
+    "action": "wait",
+    "args": [{"kind": "js", "value": "document.querySelector('h1') !== null"}],
+    "_desc": "5. 等待 JS: h1 元素存在"
+  },
+  {
+    "action": "wait",
+    "args": [{"kind": "network_idle"}],
+    "_desc": "6. 等待网络空闲"
+  },
+  {
+    "action": "extract",
+    "args": ["h1"],
+    "_desc": "7. 验证页面已加载 — 提取 h1"
+  }
+]
